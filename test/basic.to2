@@ -1,7 +1,24 @@
-use { Vessel } from ksp::vessel
+use { Vessel, AutopilotMode } from ksp::vessel
 use { CONSOLE } from ksp::console
+use { sleep, current_time } from ksp::game
 
 pub fn main_flight(vessel: Vessel) -> Result<Unit, string> = {
     CONSOLE.clear()
-    CONSOLE.print_line("Hello world")
+    CONSOLE.print_line("Vessel: " + vessel.name)
+
+    // Auto Pilot On
+    vessel.autopilot.enabled = true
+    vessel.autopilot.mode = AutopilotMode.Autopilot
+    CONSOLE.print_line("Autopilot: " + vessel.autopilot.enabled.to_string() + " " + vessel.autopilot.mode.to_string())
+    vessel.actions.light = true
+    vessel.set_throttle(1)
+
+    // Launch
+    CONSOLE.print_line("Launch: Trigger initial stage")
+    sleep(1.0)
+    vessel.staging.next()
+
+    //while(vessel.orbit.apoapsis.value < target_apoapsis)
+    //const atmPct = vessel.altitude_sealevel / (vessel.main_body.atmosphere_depth + 1)
+    //const spd = vessel.surface_velocity.magnitude 
 }
