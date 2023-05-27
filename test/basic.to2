@@ -1,0 +1,7 @@
+use { Vessel } from ksp::vessel
+use { CONSOLE } from ksp::console
+
+pub fn main_flight(vessel: Vessel) -> Result<Unit, string> = {
+    CONSOLE.clear()
+    CONSOLE.print_line("Hello world")
+}
