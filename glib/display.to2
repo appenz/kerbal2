@@ -1,0 +1,70 @@
+use { Vessel, AutopilotMode } from ksp::vessel
+use { CONSOLE } from ksp::console
+use { sleep, current_time, yield } from ksp::game
+use { format } from core::str
+
+pub struct Display(the_mission : glib::mission::Mission) {
+    mission : glib::mission::Mission = the_mission
+    h1 : string = "KSP2 Mission Bot"
+    h2 : string = "(c) 2023 by Guido Appenzeller"
+    h3 : string = ""
+    h4 : string = ""
+    h5 : string = ""
+}
+
+impl Display {
+ 
+    // Pretty print time
+    sync fn pretty_time(self, time : float) -> string = {
+        let s = time.to_int
+        return time.to_int.to_string()+" s"
+    }
+
+    // Rewrite top two lines with mission name, time etc.
+    sync fn update(self) -> Unit = {
+
+        // Top line. Mission + time
+        let t = self.pretty_time(current_time()-self.mission.start_time)
+        self.h1 = format("Mission: {0,-20} t: {1,-10}", (self.mission.name,t))
+
+        let vessel = self.mission.vessel
+        let alt2 = vessel.altitude_terrain
+        let alt = vessel.altitude_scenery 
+        let atm = alt / (vessel.main_body.atmosphere_depth + 1)
+        let spd = vessel.surface_velocity.magnitude 
+        self.h2 = format("alt: {0,8:N0}/{3,8:N0} m  ({1,5:P1})    v: {2,8:N0} m/s", (alt, atm, spd, alt2))
+
+        // Stage info
+        let dv = vessel.delta_v.stage(vessel.staging.current)
+        let fuel = "n/a"
+        if (dv.defined) {
+            let x = dv.value.start_mass/dv.value.fuel_mass
+            fuel = format("{0,5:P1}", x) 
+        }
+
+        self.h3 = format("stage: {0}/{1}    fuel: {2}", (vessel.staging.current, vessel.staging.count, fuel))
+
+        CONSOLE.print_at( 0,0, format("{0,-80}",self.h1)) 
+        CONSOLE.print_at( 1,0, format("{0,-80}",self.h2))
+        CONSOLE.print_at( 2,0, format("{0,-80}",self.h3))
+        CONSOLE.print_at( 3,0, format("{0,-80}",self.h4))
+        CONSOLE.print_at( 4,0, format("{0,-80}",self.h5))
+        CONSOLE.print_at( 5,0, "--------------------------------------------------------------------------------")
+    }
+
+    // Output a log message
+    fn log(self, msg : string) -> Unit = {
+        CONSOLE.print_line(msg)
+        self.update()
+        yield()
+    }
+
+    // Return text desctiption of the mission
+    fn start(self)-> Unit = { 
+        CONSOLE.clear()
+    CONSOLE.print_line("test")
+        self.update()
+        CONSOLE.move_cursor(25,0)
+        CONSOLE.print_line("KSP2 Mission: "+self.mission.to_string())
+    }
+}

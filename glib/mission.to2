@@ -1,0 +1,78 @@
+//
+// Base class to carry all mission state
+//
+
+use { Vessel, VesselSituation, AutopilotMode } from ksp::vessel
+use { sleep, current_time } from ksp::game
+use { CONSOLE } from ksp::console
+use { format } from core::str
+
+pub struct Mission(mission_name : string, myvessel: Vessel) {
+    name : string = mission_name
+    vessel : Vessel = myvessel
+    start_time : float = 0.0
+    stage : int = 0
+    stage_count : int = 999
+    stage_fuel : float = 0.0
+    stage_eng_c : int = 0
+}
+
+impl Mission {
+
+    // Return text desctiption of the mission
+    fn to_string(self)-> string = { 
+        self.name
+    }
+
+    // Check if all engines have flamed out. Why is this so hard.
+    sync fn flameout(self) -> bool = {
+        for(engine in self.vessel.engines)
+            if(engine.has_ignited && !engine.is_flameout) return false
+        return true 
+    }
+
+    // Check if we have landed or splashed down
+    sync fn landed(self) -> bool = {
+        if (self.vessel.situation != VesselSituation.Landed && self.vessel.situation != VesselSituation.Splashed) return false
+        return true
+    }
+
+    // Update internal data on staging
+    fn new_stage(self, con : glib::display::Display ) -> Unit = {
+        
+        let vessel = self.vessel
+        self.stage = vessel.staging.current
+        
+        // Stage info
+        let dv = vessel.delta_v.stage(vessel.staging.current)
+        self.stage_fuel = 0
+        if (dv.defined) {
+            self.stage_fuel = dv.value.start_mass/dv.value.fuel_mass
+	  let eng = dv.value.engines
+            self.stage_eng_c = eng.length            
+        }
+
+        let s =  format("stage: {0}/{1}    {3} eng, {2:N2}t fuel", (self.stage, self.stage_count, self.stage_fuel, 
+		    self.stage_eng_c))
+        con.log(s)
+    }
+
+    // Start a Mission. Save time stamp.
+    fn start(self, con : glib::display::Display)-> Unit = {
+        self.start_time = current_time()
+        self.stage_count = self.vessel.staging.count
+        self.new_stage(con)
+        con.log("autopilot: "+self.vessel.autopilot.enabled.to_string() + " " + self.vessel.autopilot.mode.to_string())
+    }
+
+    fn end(self, con : glib::display::Display) -> Unit = {
+        let t = con.pretty_time(current_time()-self.start_time)
+        let s = format("{0} ended after {1} s", (self.name,t))
+        con.log(s)
+    }
+
+    fn stage(self)-> Unit = {
+        self.vessel.staging.next()
+    }
+}
+
