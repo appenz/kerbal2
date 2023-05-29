@@ -7,42 +7,23 @@ pub fn main_flight(vessel: Vessel) -> Unit = {
 
     // Standard Setup
     let mission = glib::mission::Mission("Test Flight v1",vessel)
-    let con = glib::display::Display(mission)
-    con.start() 
-    mission.start(con)
+    let con = mission.start()
 
-    // Auto Pilot On, Throttle full
-    vessel.autopilot.enabled = true
-    vessel.autopilot.mode = AutopilotMode.Prograde
-    vessel.actions.light = true
-    vessel.set_throttle(1)
-
-    // Launch
     con.log("Launch.")
-    sleep(1.0)
+    vessel.set_throttle(1)
     mission.stage()
-    sleep(1.0)
 
-    while( !mission.flameout() ) {
-        con.update()
-        sleep(1)
-    }
+    while( !mission.flameout() ) con.update1()
 
     con.log("Flameout.")
     mission.stage()    
     
-    while(vessel.altitude_terrain > 3000) {
-        con.update()
-        sleep(1)
-    }
+    while(vessel.altitude_terrain > 3000) con.update1()
 
     con.log("Parachute.")
     mission.stage()   
 
-    while( !mission.landed() ) {
-        con.update()
-        sleep(1)
-    }
+    while( !mission.landed() ) con.update1()
 
-    mission.end(con)
+    mission.end()
 }

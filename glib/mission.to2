@@ -2,19 +2,30 @@
 // Base class to carry all mission state
 //
 
-use { Vessel, VesselSituation, AutopilotMode } from ksp::vessel
+use { Vessel, VesselSituation, AutopilotMode } from ksp::vessel
+
 use { sleep, current_time } from ksp::game
 use { CONSOLE } from ksp::console
 use { format } from core::str
 
 pub struct Mission(mission_name : string, myvessel: Vessel) {
+    // Subcomponents
+    console : Option<glib::display::Display> = glib::display::Display_None()
+
+    // Mission Parameters
     name : string = mission_name
     vessel : Vessel = myvessel
     start_time : float = 0.0
+
+    // Stage parameters for easy access
     stage : int = 0
     stage_count : int = 999
     stage_fuel : float = 0.0
     stage_eng_c : int = 0
+}
+
+pub sync fn Mission_None() -> Option<glib::mission::Mission> = {
+    return None()
 }
 
 impl Mission {
@@ -24,7 +35,7 @@ impl Mission {
         self.name
     }
 
-    // Check if all engines have flamed out. Why is this so hard.
+    // Check if all engines have flamed out.
     sync fn flameout(self) -> bool = {
         for(engine in self.vessel.engines)
             if(engine.has_ignited && !engine.is_flameout) return false
@@ -38,17 +49,18 @@ impl Mission {
     }
 
     // Update internal data on staging
-    fn new_stage(self, con : glib::display::Display ) -> Unit = {
+    fn new_stage(self) -> Unit = {
         
         let vessel = self.vessel
-        self.stage = vessel.staging.current
+        let con  = self.console.value
+        self.stage = vessel.staging.count
         
         // Stage info
         let dv = vessel.delta_v.stage(vessel.staging.current)
         self.stage_fuel = 0
         if (dv.defined) {
-            self.stage_fuel = dv.value.start_mass/dv.value.fuel_mass
-	  let eng = dv.value.engines
+            self.stage_fuel = dv.value.fuel_mass
+	        let eng = dv.value.engines
             self.stage_eng_c = eng.length            
         }
 
@@ -58,21 +70,48 @@ impl Mission {
     }
 
     // Start a Mission. Save time stamp.
-    fn start(self, con : glib::display::Display)-> Unit = {
+    fn start(self) -> glib::display::Display = {
+
+        if (self.start_time > 1) {
+            CONSOLE.print_line("*** ERROR: mission.start() called twice!")
+            sleep(1)
+            return self.console.value
+        }
+        let vessel = self.vessel
+
+        // Create a Console
+        self.console = glib::display::Display()
+        let con = self.console.value
+        con.start(self)
+
+        // Set up mission parameters
         self.start_time = current_time()
-        self.stage_count = self.vessel.staging.count
-        self.new_stage(con)
+        self.stage_count = self.vessel.staging.total_count
+        self.new_stage()
         con.log("autopilot: "+self.vessel.autopilot.enabled.to_string() + " " + self.vessel.autopilot.mode.to_string())
+
+        // Some vessel configuration
+        vessel.autopilot.enabled = true
+        vessel.autopilot.mode = AutopilotMode.Prograde
+        vessel.actions.light = true
+
+        // Return the console
+        return con
     }
 
-    fn end(self, con : glib::display::Display) -> Unit = {
+    fn end(self) -> Unit = {
+        let con  = self.console.value
         let t = con.pretty_time(current_time()-self.start_time)
         let s = format("{0} ended after {1} s", (self.name,t))
         con.log(s)
     }
 
     fn stage(self)-> Unit = {
+        sleep(0.5)
         self.vessel.staging.next()
+        sleep(0.5)
+        self.new_stage()
+        sleep(0.5)
     }
 }
 

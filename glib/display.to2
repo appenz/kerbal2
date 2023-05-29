@@ -3,13 +3,18 @@ use { CONSOLE } from ksp::console
 use { sleep, current_time, yield } from ksp::game
 use { format } from core::str
 
-pub struct Display(the_mission : glib::mission::Mission) {
-    mission : glib::mission::Mission = the_mission
+pub struct Display() {
+    // Subcomponents
+    mission : Option<glib::mission::Mission> = glib::mission::Mission_None()
     h1 : string = "KSP2 Mission Bot"
     h2 : string = "(c) 2023 by Guido Appenzeller"
     h3 : string = ""
     h4 : string = ""
     h5 : string = ""
+}
+
+pub sync fn Display_None() -> Option<glib::display::Display> = {
+    return None()
 }
 
 impl Display {
@@ -24,10 +29,11 @@ impl Display {
     sync fn update(self) -> Unit = {
 
         // Top line. Mission + time
-        let t = self.pretty_time(current_time()-self.mission.start_time)
-        self.h1 = format("Mission: {0,-20} t: {1,-10}", (self.mission.name,t))
+        let mission = self.mission.value
+        let t = self.pretty_time(current_time()-mission.start_time)
+        self.h1 = format("Mission: {0,-20} t: {1,-10}", (mission.name,t))
 
-        let vessel = self.mission.vessel
+        let vessel = mission.vessel
         let alt2 = vessel.altitude_terrain
         let alt = vessel.altitude_scenery 
         let atm = alt / (vessel.main_body.atmosphere_depth + 1)
@@ -44,12 +50,19 @@ impl Display {
 
         self.h3 = format("stage: {0}/{1}    fuel: {2}", (vessel.staging.current, vessel.staging.count, fuel))
 
-        CONSOLE.print_at( 0,0, format("{0,-80}",self.h1)) 
+        CONSOLE.print_at( 0,0, format("{0,-80}",self.h1))
+ 
         CONSOLE.print_at( 1,0, format("{0,-80}",self.h2))
         CONSOLE.print_at( 2,0, format("{0,-80}",self.h3))
         CONSOLE.print_at( 3,0, format("{0,-80}",self.h4))
         CONSOLE.print_at( 4,0, format("{0,-80}",self.h5))
         CONSOLE.print_at( 5,0, "--------------------------------------------------------------------------------")
+    }
+
+    // Update, and sleep(1)
+    fn update1(self) -> Unit = {
+        self.update()
+        sleep(1)
     }
 
     // Output a log message
@@ -59,12 +72,12 @@ impl Display {
         yield()
     }
 
-    // Return text desctiption of the mission
-    fn start(self)-> Unit = { 
+    // Initialize the console
+    fn start(self, mission : glib::mission::Mission)-> Unit = { 
+        self.mission = mission
         CONSOLE.clear()
-    CONSOLE.print_line("test")
         self.update()
         CONSOLE.move_cursor(25,0)
-        CONSOLE.print_line("KSP2 Mission: "+self.mission.to_string())
+        CONSOLE.print_line("KSP2 Mission: "+mission.to_string())
     }
 }

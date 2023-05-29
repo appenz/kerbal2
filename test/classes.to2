@@ -1,0 +1,63 @@
+//
+// This is a set of tests to find out if we can do structures that contain
+// structures in TO2. It turns out, this is surprisingly hard.
+
+use { Vessel, AutopilotMode } from ksp::vessel
+use { CONSOLE } from ksp::console
+
+// It works fine if we pass a structure into the constructor of a structure
+// or if we call a constructor directly. But often we want initialization to
+// be lazy (e.g. for two structures pointing at each other)
+
+pub struct foo() {
+    test1 : int = 0
+}
+
+pub struct bar() {
+    foo1 : test::classes::foo = test::classes::foo()
+}
+
+pub struct bar2(f : Option<test::classes::foo> ) {
+    foo1 : Option<test::classes::foo>  = f
+}
+
+// So how do we create a structure with a pointer to another structure
+// that initially is uninitialized?
+//
+// Naively we would do this:
+//   foo1 : Option<test::classes::foo>  = None()
+//
+// But it fails with the following error.
+//   ERROR: [test\classes.to2(17, 42)] InvalidType
+//   Unable to infer generic argument T of KontrolSystem.TO2.Runtime.Option`1[T] None[T]()
+
+// We can instantiate an empty struct inside a struct if we use a function
+// instead. It's a little bit hacky.
+
+pub sync fn no_foo() -> Option<test::classes::foo> = {
+    return None()
+}
+
+pub struct bar3() {
+    foo1 : Option<test::classes::foo>  = no_foo()
+}
+
+// I didn't find a way to do this inline with a lambda function.
+
+pub struct bar4() {
+    // foo1 : Option<test::classes::foo> = fn() -> test::classes::foo()
+}
+
+
+pub fn main_flight(vessel: Vessel) -> Unit = {
+    
+    // Auto initializing a subclass (i.e. struct within a struct) works.
+    let b = bar()
+
+    // We can do lazy initialization
+    let f : Option<test::classes::foo> = None()
+    let b2 = bar2(f)
+    let f2 = b2.foo1
+
+    CONSOLE.print_line("success.")
+}
