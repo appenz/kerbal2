@@ -17,20 +17,29 @@ pub sync fn Display_None() -> Option<glib::display::Display> = {
     return None()
 }
 
+pub sync fn panic( s : string) -> Unit = {
+    CONSOLE.print_line("*** Panic: "+s)
+}
+
+pub sync fn warning( s : string) -> Unit = {
+    CONSOLE.print_line("** Warning: "+s)
+}
+
+
+// Pretty print time
+pub sync fn pretty_time(time : float) -> string = {
+    let s = time.to_int
+    return time.to_int.to_string()+" s"
+}
+
 impl Display {
- 
-    // Pretty print time
-    sync fn pretty_time(self, time : float) -> string = {
-        let s = time.to_int
-        return time.to_int.to_string()+" s"
-    }
 
     // Rewrite top two lines with mission name, time etc.
     sync fn update(self) -> Unit = {
 
         // Top line. Mission + time
         let mission = self.mission.value
-        let t = self.pretty_time(current_time()-mission.start_time)
+        let t = pretty_time(current_time()-mission.start_time)
         self.h1 = format("Mission: {0,-20} t: {1,-10}", (mission.name,t))
 
         let vessel = mission.vessel

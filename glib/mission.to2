@@ -3,10 +3,11 @@
 //
 
 use { Vessel, VesselSituation, AutopilotMode } from ksp::vessel
-
-use { sleep, current_time } from ksp::game
+use { sleep, current_time, wait_until } from ksp::game
+use { warp_to } from ksp::game::warp
 use { CONSOLE } from ksp::console
 use { format } from core::str
+use { warning, panic } from glib::display
 
 pub struct Mission(mission_name : string, myvessel: Vessel) {
     // Subcomponents
@@ -69,6 +70,42 @@ impl Mission {
         con.log(s)
     }
 
+    fn burnNextNode(self) -> Unit = {
+        let con  = self.console.value
+        let vessel = self.vessel
+        const node_result = vessel.maneuver.next_node()
+
+        if (!node_result.success) {
+            warning("Called burn_node with no maneuver node set.")
+            return
+        }
+
+        const node = node_result.value
+        const target_orbit = node.expected_orbit
+        const frame = vessel.main_body.celestial_frame
+        const t_end = node.time + node.burn_duration
+
+        // Need code here to orient vessel first
+        // Need code to warp
+        wait_until(fn() -> node.ETA <= 15)
+        vessel.autopilot.enabled = true
+        vessel.autopilot.mode = AutopilotMode.Maneuver
+        sleep(10)
+        wait_until(fn() -> node.ETA <= 0.5)
+        vessel.autopilot.mode = AutopilotMode.StabilityAssist
+
+        let t = current_time()
+
+        while (t < t_end) {
+            t = current_time()
+            vessel.set_throttle(1)
+            con.update1()
+        }
+
+        vessel.set_throttle(0)
+        vessel.autopilot.mode = AutopilotMode.Prograde
+    }
+
     // Start a Mission. Save time stamp.
     fn start(self) -> glib::display::Display = {
 
@@ -101,7 +138,7 @@ impl Mission {
 
     fn end(self) -> Unit = {
         let con  = self.console.value
-        let t = con.pretty_time(current_time()-self.start_time)
+        let t = glib::display::pretty_time(current_time()-self.start_time)
         let s = format("{0} ended after {1} s", (self.name,t))
         con.log(s)
     }
