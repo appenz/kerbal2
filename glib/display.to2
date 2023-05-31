@@ -11,6 +11,7 @@ pub struct Display() {
     h3 : string = ""
     h4 : string = ""
     h5 : string = ""
+    last_update : float = 0
 }
 
 pub sync fn Display_None() -> Option<glib::display::Display> = {
@@ -72,6 +73,15 @@ impl Display {
     fn update1(self) -> Unit = {
         self.update()
         sleep(1)
+    }
+
+    // Update only if 0.95s have passed
+    fn update_slow(self) -> Unit = {
+        const ct = current_time()
+        if (ct-self.last_update > 0.95) {
+            self.update()
+            self.last_update = ct
+        }
     }
 
     // Output a log message

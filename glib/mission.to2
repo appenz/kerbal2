@@ -70,7 +70,13 @@ impl Mission {
         con.log(s)
     }
 
-    fn burnNextNode(self) -> Unit = {
+    fn clearNodes(self) -> Unit = {
+        while(self.vessel.maneuver.nodes.length > 0) {
+            self.vessel.maneuver.nodes[0].remove()
+        }
+    }
+
+    fn burnNextNode(self, ap_lock: bool) -> Unit = {
         let con  = self.console.value
         let vessel = self.vessel
         const node_result = vessel.maneuver.next_node()
@@ -91,19 +97,24 @@ impl Mission {
         vessel.autopilot.enabled = true
         vessel.autopilot.mode = AutopilotMode.Maneuver
         sleep(10)
-        wait_until(fn() -> node.ETA <= 0.5)
-        vessel.autopilot.mode = AutopilotMode.StabilityAssist
+        wait_until(fn() -> node.ETA <= 0.2)
+
+        // Maneuver nodes seem a bit broken right now. Lock direction if needed.
+        if (ap_lock)
+            vessel.autopilot.mode = AutopilotMode.StabilityAssist
 
         let t = current_time()
 
         while (t < t_end) {
             t = current_time()
             vessel.set_throttle(1)
-            con.update1()
+            sleep(0.2)
+            con.update_slow()
         }
 
         vessel.set_throttle(0)
         vessel.autopilot.mode = AutopilotMode.Prograde
+        node.remove()
     }
 
     // Start a Mission. Save time stamp.

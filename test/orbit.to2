@@ -4,7 +4,7 @@ use { vec2, vec3, Vec3 } from ksp::math
 use { CONSOLE } from ksp::console
 use { sleep, current_time } from ksp::game
 
-use { acos_deg, max, clamp, sqrt, PI, min } from core::math
+use { acos_deg, clamp, sqrt, PI, min, max } from core::math
 use { format } from core::str
 
 use { Mission } from glib::mission
@@ -36,6 +36,10 @@ impl Node {
         let t = glib::display::pretty_time(self.time-current_time())
         return format("In {0}  dV: {1:N1} m/s", (t,self.delta_v.magnitude))    
     }
+
+    sync fn split(self, n: Node, p: float) -> Node = {
+        return Node(n.time,p*n.delta_v)
+    }   
 
     // Estimate burn time for the node. Assume all in a single (current) stage
     sync fn estBurnTime(self, vessel: Vessel) -> float = {
@@ -158,8 +162,8 @@ pub fn main_flight(vessel: Vessel) -> Unit = {
     con.log(format("Target Apoapsis {0:N}, heading {1:N} deg.", (target_apoapsis, heading)))
     con.h4 = format("Gravity turn starting at {0:N}m", turn_min_alt)
 
-    // Phase one: burn until trajectory is close to apoapsis
-    while(vessel.orbit.apoapsis.value < target_apoapsis) {
+    // Phase one: burn until trajectory is 90% of apoapsis
+    while(vessel.orbit.apoapsis.value < max(target_apoapsis*0.9,ath_depth)) {
 
         // Check if high enough for gravity turn
         if (vessel.altitude_sealevel > turn_min_alt) {
@@ -174,7 +178,8 @@ pub fn main_flight(vessel: Vessel) -> Unit = {
             sleep(1)
             mission.stage()       
         }
-        con.update1()
+        con.update_slow()
+        sleep(0.1)
     }
 
     vessel.set_throttle(0)
@@ -187,8 +192,24 @@ pub fn main_flight(vessel: Vessel) -> Unit = {
     con.log("Node: "+n.to_string())
     con.log("Burn time: "+n.estBurnTime(vessel).to_string()+" s")
 
-    n.addManeuver(vessel)
-    mission.burnNextNode()   
+    // Split into two parts, 95% and last 5%
+
+    let n1 = Node(n.time-10,n.delta_v*0.95)
+    n1.addManeuver(vessel)
+    mission.burnNextNode(true)
+    con.log("1st burn complete.")
+
+    let n2 = change_pe_at_ap(vessel,target_apoapsis)
+    n2.addManeuver(vessel)
+    mission.burnNextNode(true)
+    con.log("2nd burn complete.")
+
+    if (vessel.orbit.periapsis < target_apoapsis) {
+        con.log("Periapsis low, raising.")
+        let n3 = change_pe_at_ap(vessel,target_apoapsis)
+        n3.addManeuver(vessel)
+        mission.burnNextNode(true)
+    }
 
     mission.end()
 }
