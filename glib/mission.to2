@@ -2,14 +2,19 @@
 // Base class to carry all mission state
 //
 
-use { Vessel, VesselSituation, AutopilotMode } from ksp::vessel
+use { Vessel, VesselSituation, AutopilotMode, DeltaVSituation } from ksp::vessel
 use { sleep, current_time, wait_until } from ksp::game
 use { warp_to } from ksp::game::warp
 use { CONSOLE } from ksp::console
+
+use { acos_deg, clamp, sqrt, PI, min, max, abs } from core::math
 use { format } from core::str
-use { warning, panic } from glib::display
+
+use { warning, panic, pretty_time } from glib::display
+use { Node, ErrorNode } from glib::maneuver
 
 pub struct Mission(mission_name : string, myvessel: Vessel) {
+
     // Subcomponents
     console : Option<glib::display::Display> = glib::display::Display_None()
 
@@ -23,6 +28,8 @@ pub struct Mission(mission_name : string, myvessel: Vessel) {
     stage_count : int = 999
     stage_fuel : float = 0.0
     stage_eng_c : int = 0
+    stage_thrust : float = 0
+    stage_delta_v : float = 0
 }
 
 pub sync fn Mission_None() -> Option<glib::mission::Mission> = {
@@ -49,25 +56,85 @@ impl Mission {
         return true
     }
 
+    // Step through all the stages, return # of stages with engines
+    fn check_stages(self) -> int = {
+        
+        const vessel = self.vessel
+        const con  = self.console.value
+        let stage = vessel.staging.count
+        let eng_stages = 0
+        let eng_name = ""
+
+        con.log(format("Checking {0} stages:",stage))
+
+        while(stage >0 ) {
+            stage -= 1
+
+            const maybe_stage_info = vessel.delta_v.stage(stage)
+            if(!maybe_stage_info.defined) continue
+
+            const stage_info = maybe_stage_info.value
+            const deltav = stage_info.get_deltav(DeltaVSituation.Vaccum)
+            const thrust = stage_info.get_thrust(DeltaVSituation.Vaccum)
+            const mass = stage_info.start_mass
+            const fuel = stage_info.fuel_mass
+            const eng_c = stage_info.active_engines.length
+            if( eng_c > 0) {
+                eng_stages = eng_stages+1
+                eng_name = eng_c.to_string()+" x ("+stage_info.active_engines[0].engine_module.part_name+")"
+            } else {
+                eng_name = ""
+            }
+
+            let s =  format("    {0} dv: {1,5:N0} m/s  mass: {2,4:N1} t  T/W: {3,4:N1}    {4}", 
+                            (stage, deltav, mass, thrust/mass, eng_name))
+            con.log(s)
+        }
+    
+        con.log(format("Total {0} stages with engines.",eng_stages))
+        return eng_stages
+    }
+
     // Update internal data on staging
-    fn new_stage(self) -> Unit = {
-        
-        let vessel = self.vessel
-        let con  = self.console.value
-        self.stage = vessel.staging.count
-        
-        // Stage info
-        let dv = vessel.delta_v.stage(vessel.staging.current)
+    fn new_stage(self, log_this: bool) -> Unit = {
+
+        const vessel = self.vessel
+        const con  = self.console.value      
+
+        self.stage = vessel.staging.count-1
         self.stage_fuel = 0
-        if (dv.defined) {
-            self.stage_fuel = dv.value.fuel_mass
-	        let eng = dv.value.engines
-            self.stage_eng_c = eng.length            
+        self.stage_thrust = 0 
+        self.stage_eng_c = 0
+        self.stage_delta_v = 0
+        let eng_c = 0
+        let eng_name = ""
+    
+        // Store some useful parameters in the mission sturct
+
+        const maybe_stage_info = vessel.delta_v.stage(self.stage)
+        if(maybe_stage_info.defined) {
+            const stage_info = maybe_stage_info.value // Type: StageDeltaV
+            self.stage_delta_v = stage_info.get_deltav(DeltaVSituation.Vaccum)
+            self.stage_thrust = stage_info.get_thrust(DeltaVSituation.Vaccum)
+            self.stage_fuel = stage_info.fuel_mass
+            self.stage_eng_c = stage_info.engines.length
+            eng_c = stage_info.active_engines.length
+            if( eng_c > 0) {
+                eng_name = eng_c.to_string()+" x "+stage_info.active_engines[0].engine_module.part_name
+            }       
+        } else {
+            panic("Can't get stage info for current stage.")
         }
 
-        let s =  format("stage: {0}/{1}    {3} eng, {2:N2}t fuel", (self.stage, self.stage_count, self.stage_fuel, 
-		    self.stage_eng_c))
-        con.log(s)
+        let s =  format("Stage:  {0} dv: {1,5:N0} m/s  mass: {2,4:N1} t  T/W: {3,4:N1}    {4}", 
+                        (vessel.staging.current, self.stage_delta_v, vessel.mass, self.stage_thrust/vessel.mass, eng_name))
+        if (log_this) con.log(s)
+    }
+
+    fn addManeuver(self, n: Node) -> Unit = {
+        const burn_time = n.estBurnTime(self.vessel)
+        self.vessel.maneuver.add_burn_vector(n.time - burn_time/2, n.delta_v)
+        self.console.value.log("Maneuver: "+n.to_string()+"  burn: "+pretty_time(burn_time))
     }
 
     fn clearNodes(self) -> Unit = {
@@ -76,9 +143,10 @@ impl Mission {
         }
     }
 
-    fn burnNextNode(self, ap_lock: bool) -> Unit = {
+    fn burnNextNodeX(self, ap_lock: bool, ap_target: float, pe_target:float ) -> Unit = {
         let con  = self.console.value
         let vessel = self.vessel
+        let orbit = vessel.orbit
         const node_result = vessel.maneuver.next_node()
 
         if (!node_result.success) {
@@ -86,17 +154,20 @@ impl Mission {
             return
         }
 
+        if (self.stage_thrust == 0) {
+            panic("Calling burnNextNode with zero thrust!")
+            return
+        }
+
         const node = node_result.value
         const target_orbit = node.expected_orbit
         const frame = vessel.main_body.celestial_frame
-        const t_end = node.time + node.burn_duration
+        let t_end = node.time + node.burn_duration
 
         // Need code here to orient vessel first
-        // Need code to warp
-        wait_until(fn() -> node.ETA <= 15)
+        warp_to(node.time - 10)
         vessel.autopilot.enabled = true
         vessel.autopilot.mode = AutopilotMode.Maneuver
-        sleep(10)
         wait_until(fn() -> node.ETA <= 0.2)
 
         // Maneuver nodes seem a bit broken right now. Lock direction if needed.
@@ -105,9 +176,100 @@ impl Mission {
 
         let t = current_time()
 
-        while (t < t_end) {
+        let ap_delta_min = 10E35
+        let pe_delta_min = 10E35
+        let dv_min = 10E35
+        let ap_old = 0.0
+        let pe_old = 0.0
+        let stop = false
+        let t_additional = 0.0
+        let throttle = 0.01
+        let dv_total = node.global_burn_vector.vector
+        let dv = dv_total
+        let burn_time = node.burn_duration
+
+        // If we use AP or PE mode, we allow for some error
+        if (ap_target > 0 || pe_target > 0) 
+            t_additional = 15
+
+        while (!stop && dv.magnitude > 0.1 ) {
             t = current_time()
-            vessel.set_throttle(1)
+            dv = target_orbit.global_velocity(t).to_relative(frame) - vessel.orbit.global_velocity(t).to_relative(frame)
+            burn_time = dv.magnitude/(self.stage_thrust/vessel.mass)
+
+            throttle = clamp(burn_time/2, 0.01,1.0)
+
+            if( self.flameout() ) {
+                con.log("Flameout.")
+                vessel.set_throttle(0)
+                self.stage() 
+                t_end += 5      
+            }
+
+            if (t > t_end+5) {
+                con.log("Stop burn due to time exceeded.")
+                stop = true
+            }
+
+            if (dv.magnitude > dv_min*1.1) {
+                con.log("Stop burn due to dv increasing at "+dv.magnitude.to_string())
+                stop=true 
+            }
+            dv_min = min(dv.magnitude,dv_min)
+
+            con.h4 = format("Node Burn: {0:N1} s ({1:P1})   dV: {2:N2} ({3:P1})  throttle: {4}", 
+                            (burn_time,burn_time/node.burn_duration, dv.magnitude, dv.magnitude/dv_total.magnitude, throttle) )
+
+            // Abort the burn prematurely if we overshoot.
+            if(ap_target > 0 ) {
+                // Make sure we have an apoapsis, if not just burn
+                if ( orbit.apoapsis.defined) {
+                    // Check if this is the 1st time we have an apoapsis. If yes, initialize but do nothing else
+                    if (ap_old == 0) {
+                        ap_old = orbit.apoapsis.value
+                    } else {
+                        // Check if we are getting closer
+                        let ap_delta = abs(orbit.apoapsis.value-ap_target)
+                        let ap_err = abs(ap_delta/ap_target)
+                        let dx = max(ap_delta_min-ap_delta,1)          
+                        con.h5 = format("AP Target: {0:N0}/{1:N0} err {2:P3} dx/tic: {3:N0}", 
+                                (orbit.apoapsis.value, ap_target, ap_err, dx) )
+                        //con.log(ap_delta.to_string()+" "+ap_delta_min.to_string())
+                        if (ap_delta > ap_delta_min*1.1) {
+                            vessel.set_throttle(0)
+                            sleep(1)
+                            con.log( format("Stop burn, AP reached: {0:N0}/{1:N0} error {2:P3} dt: {3:N1}s", 
+                                     (orbit.apoapsis.value, ap_target, ap_err, t_end-t ) ))
+                            stop = true
+                        }
+                        ap_old = orbit.apoapsis.value
+                        ap_delta_min = min(ap_delta_min,ap_delta)
+                    }
+                }
+            } else if(pe_target > 0) {
+                // Check if this is the 1st time we have an periapsis. If yes, initialize but do nothing else
+                if (pe_old == 0) {
+                    pe_old = orbit.periapsis
+                } else {
+                    // Check if we are getting closer
+                    let pe_delta = abs(orbit.periapsis-pe_target)
+                    let pe_err = abs(pe_delta/pe_target)  
+                    let dx = max(pe_delta_min-pe_delta,1)       
+                    con.h5 = format("PE Target: {0:N0}/{1:N0} err {2:P3} dx/tix: {3:N0}", 
+                                (orbit.periapsis, pe_target, pe_err, dx))
+                    if (pe_delta > pe_delta_min*1.1) {
+                        vessel.set_throttle(0)
+                        sleep(1)
+                        con.log( format("Stop burn, PE reached: {0:N0}/{1:N0} error {2:P3} dt: {3:N1}s", 
+                                    (orbit.periapsis, pe_target, pe_err, t_end-t )  ))
+                        stop = true
+                    }
+                    pe_old = orbit.periapsis
+                    pe_delta_min = min(pe_delta_min,pe_delta)
+                }              
+            }
+
+            vessel.set_throttle(throttle)
             sleep(0.2)
             con.update_slow()
         }
@@ -115,6 +277,10 @@ impl Mission {
         vessel.set_throttle(0)
         vessel.autopilot.mode = AutopilotMode.Prograde
         node.remove()
+    }
+
+    fn burnNextNode(self) -> Unit = {
+        return self.burnNextNodeX(false,0,0)
     }
 
     // Start a Mission. Save time stamp.
@@ -135,13 +301,15 @@ impl Mission {
         // Set up mission parameters
         self.start_time = current_time()
         self.stage_count = self.vessel.staging.total_count
-        self.new_stage()
-        con.log("autopilot: "+self.vessel.autopilot.enabled.to_string() + " " + self.vessel.autopilot.mode.to_string())
+        self.check_stages()
+        self.new_stage(false)
 
         // Some vessel configuration
         vessel.autopilot.enabled = true
         vessel.autopilot.mode = AutopilotMode.Prograde
         vessel.actions.light = true
+
+        con.log(" ")
 
         // Return the console
         return con
@@ -155,11 +323,10 @@ impl Mission {
     }
 
     fn stage(self)-> Unit = {
-        sleep(0.5)
+        sleep(1)
         self.vessel.staging.next()
-        sleep(0.5)
-        self.new_stage()
-        sleep(0.5)
+        sleep(2)
+        self.new_stage(true)
     }
 }
 

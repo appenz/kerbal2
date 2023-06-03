@@ -96,7 +96,7 @@ impl Display {
         self.mission = mission
         CONSOLE.clear()
         self.update()
-        CONSOLE.move_cursor(25,0)
+        CONSOLE.move_cursor(99,0)
         CONSOLE.print_line("KSP2 Mission: "+mission.to_string())
     }
 }
