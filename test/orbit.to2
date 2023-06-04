@@ -9,15 +9,16 @@ use { format } from core::str
 
 use { Mission } from glib::mission
 use { warning, panic } from glib::display
-use { Node, launch_athmosphere, circularize_at_ap, change_pe_at_ap } from glib::maneuver
+use { Node, circularize_at_ap, change_pe_at_ap } from glib::maneuver_vacuum
+use { launch_atmosphere } from glib::maneuver_atmosphere
 
-pub fn main_flight(vessel: Vessel) -> Unit = {
+fn main_flight(vessel: Vessel) -> Unit = {
 
     // Standard Setup
     let mission = Mission("Test Flight v1",vessel)
     let con = mission.start()
 
-    launch_athmosphere(mission, 80000, 0.005, 0.7, 90)
+    launch_atmosphere(mission, 80000, 0.01, 0.7, 90)
 
     mission.end()
 }

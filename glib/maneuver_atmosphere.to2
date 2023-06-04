@@ -1,0 +1,196 @@
+//
+// Base class to carry all mission state
+//
+
+use { Vessel, VesselSituation, AutopilotMode, DeltaVSituation } from ksp::vessel
+use { sleep, current_time, wait_until, yield } from ksp::game
+use { warp_to } from ksp::game::warp
+use { CONSOLE } from ksp::console
+
+use { acos_deg, clamp, sqrt, PI, min, max, abs } from core::math
+use { format } from core::str
+
+use { warning, panic, pretty_time } from glib::display
+use { Node, ErrorNode, circularize_at_ap, change_pe_at_ap } from glib::maneuver_vacuum
+use { Mission } from glib::mission
+
+// Burn a maneuver node that is part of an athmospheric ascent
+// This means:
+// - We don't trust the built-in nodes
+// - Set AP to holding horizontal, don't follow maneuver
+// - Check we don't exceep max AP
+
+pub fn burnNextNodeAtm(mission: Mission, ap_target: float) -> Unit = {
+    let con  = mission.console.value
+    let vessel = mission.vessel
+    let orbit = vessel.orbit
+    const node_result = vessel.maneuver.next_node()
+
+    if (!node_result.success) {
+        warning("called burn_node with no maneuver node set.")
+        return
+    }
+
+    if (mission.stage_thrust == 0) {
+        panic("calling burnNextNode with zero thrust!")
+        return
+    }
+
+    if (!vessel.orbit.apoapsis.defined) {
+        panic("orbit has no apoapsis defined.")
+        return
+    }
+
+    const node = node_result.value
+    const target_orbit = node.expected_orbit
+    const frame = vessel.main_body.celestial_frame
+
+    // Need code here to orient vessel first
+    warp_to(node.time - 10)
+    vessel.autopilot.enabled = true
+    vessel.autopilot.mode = AutopilotMode.Maneuver
+    wait_until(fn() -> node.ETA <= 0.2)
+
+    // Maneuver nodes seem a bit broken right now. Lock direction.
+    vessel.autopilot.mode = AutopilotMode.StabilityAssist
+
+    let dv_min = 10E35
+    let dv_total = node.global_burn_vector.vector
+    let dv = dv_total
+    let burn_time = node.burn_duration
+    let stop = false
+
+    con.log(format("Atmospheric burn dv: {0:N0} m/s  dt: {1}  ap_max: {2} m", (dv.magnitude, pretty_time(burn_time), ap_target)))
+    const  t_start = current_time()
+
+    while (dv.magnitude > 0.1 && !stop) {
+        const t = current_time()
+        const ap = vessel.orbit.apoapsis.value
+
+        // Limit throttle based on dv remaining
+        dv = target_orbit.global_velocity(t).to_relative(frame) - vessel.orbit.global_velocity(t).to_relative(frame)
+        burn_time = dv.magnitude/(mission.stage_thrust/vessel.mass)
+        let throttle = clamp(burn_time/2, 0.01,1.0)
+
+        // Limit throttle if close to AP
+        const t_ap = vessel.orbit.next_apoapsis_time().value
+        const v_ap = target_orbit.global_velocity(t_ap).to_relative(frame).magnitude
+        const v_ap_target = vessel.orbit.global_velocity(t_ap).to_relative(frame).magnitude
+
+
+        if( mission.flameout() ) {
+            con.log("  flameout.")
+            vessel.set_throttle(0)
+            mission.stage()  
+        }
+
+        if (ap > ap_target) {
+            con.log("  stop burn due apoapsis exceeding target "+ap_target.to_string())
+            stop = true
+        }
+
+        if (dv.magnitude > dv_min*1.1) {
+            con.log("  stop burn due to dv increasing at "+dv.magnitude.to_string())
+            stop = true 
+        }
+        dv_min = min(dv.magnitude,dv_min)
+
+        con.h4 = format("Node Burn: {0:N1} s ({1:P1})   dV: {2:N2} ({3:P1})  throttle: {4}", 
+                        (burn_time,burn_time/node.burn_duration, dv.magnitude, dv.magnitude/dv_total.magnitude, throttle) )
+        con.h5 = format("AP Target Mode: {0:N0} vs {1:N0} ({2:P1})   v_ap: {3:N0} vs {4:N0}", 
+                        (ap, ap_target, abs(ap_target-ap)/ap_target, v_ap, v_ap_target ))
+
+        if (!stop) {
+            vessel.set_throttle(throttle)
+            sleep(0.2)
+            con.update_slow()
+        }
+    }
+
+    vessel.set_throttle(0)
+    yield()
+    con.log(format("  ended after {0}", (pretty_time(current_time()-t_start))))
+    sleep(1)
+    vessel.autopilot.mode = AutopilotMode.Prograde
+    node.remove()
+}
+
+pub fn launch_atmosphere(mission: Mission, target_apoapsis: float, 
+                          turn_min: float, turn_max: float, heading: float) -> Unit = {
+
+    const vessel = mission.vessel
+    const con = mission.console.value
+
+    // If we are landed or pre-launch, launch
+    if (vessel.situation == VesselSituation.Landed || vessel.situation == VesselSituation.PreLaunch) {
+        con.log("Vessel is on the ground. Launch.")
+        vessel.set_throttle(1)
+        mission.stage()
+        vessel.autopilot.mode = AutopilotMode.Autopilot
+    }
+
+    // calculate gravity turn altitudes
+    const ath_depth = vessel.main_body.atmosphere_depth
+    const turn_min_alt = ath_depth * turn_min
+    const turn_max_alt = ath_depth * turn_max
+    const initial_alt = max(target_apoapsis*0.9,ath_depth*1.05)
+
+    con.log(format("Target Apoapsis {0:N}, heading {1:N} deg.", (target_apoapsis, heading)))
+    con.h4 = format("Gravity turn starting at {0:N}m", turn_min_alt)
+
+    // Phase one: burn until trajectory is 90% of apoapsis
+    while(vessel.orbit.apoapsis.value < initial_alt) {
+
+        // Check if high enough for gravity turn
+        if (vessel.altitude_sealevel > turn_min_alt) {
+            let pitch = acos_deg(clamp((vessel.altitude_sealevel - turn_min_alt) / (turn_max_alt-turn_min_alt), 0, 1))
+            vessel.autopilot.target_orientation = vessel.heading_direction(heading, pitch, 0).vector
+            con.h4 = format("Launch: {0:P1}  pitch: {1:N1} deg", (vessel.altitude_sealevel/target_apoapsis, pitch))
+        }
+
+        if (vessel.orbit.apoapsis.value/initial_alt > 0.95) {
+            vessel.set_throttle( clamp(50*(1-(vessel.orbit.apoapsis.value/initial_alt)),0.1,1) )
+        }
+
+        // Check if we need to stage
+        if( mission.flameout() ) {
+            con.log("Flameout, advancing to new stage.")
+            sleep(1)
+            mission.stage()       
+        }
+        con.update_slow()
+        sleep(0.1)
+    }
+
+    vessel.set_throttle(0)
+    vessel.autopilot.mode = AutopilotMode.Prograde
+
+    let t_apo = vessel.orbit.next_apoapsis_time().value
+    con.log(format("Apoapsis {0:N} in {1:N} seconds.", (vessel.orbit.apoapsis.value, t_apo-current_time())))
+
+    // Critical: need to let the system catch up, otherwise maneuver node is broken
+    sleep(1)
+
+    // Split into two parts, first burn to 95% of dv at a max 98% or tatget apoapsis
+    let n = circularize_at_ap(vessel)
+    let n1 = Node(n.time-20,n.delta_v*0.95)
+    mission.addManeuver(n1)
+    const ap_step = max( max(ath_depth*1.05,target_apoapsis*0.98), vessel.orbit.apoapsis.value)
+    mission.burnNextNodeAtm(ap_step)
+    con.log("1st burn complete.")
+
+    // Second, precision burn to raise periapsis
+    let n2 = change_pe_at_ap(vessel,target_apoapsis)
+    mission.addManeuver(n2)
+    mission.burnNextNode()
+    con.log("2nd burn complete.")
+
+    if (vessel.orbit.periapsis < target_apoapsis) {
+        con.log("Periapsis low, raising.")
+        let n3 = circularize_at_ap(vessel)
+        mission.addManeuver(n3)
+        mission.burnNextNode()
+    }
+
+    con.log("Athmospheric launch complete.")
+}

@@ -3,7 +3,7 @@ use { CONSOLE } from ksp::console
 use { sleep, current_time } from ksp::game
 //use { mission } from glib::mission
 
-pub fn main_flight(vessel: Vessel) -> Unit = {
+fn main_flight(vessel: Vessel) -> Unit = {
 
     // Standard Setup
     let mission = glib::mission::Mission("Test Flight v1",vessel)
