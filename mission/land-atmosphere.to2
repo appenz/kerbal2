@@ -1,0 +1,18 @@
+//
+// Right now this only does a super simple landing without picking a specific place
+//
+
+use { Vessel } from ksp::vessel
+use { Mission } from glib::mission
+use { land_atmosphere } from glib::maneuver_atmosphere
+
+pub fn main_flight(vessel: Vessel, capture_alt: float = 0) -> Unit = {
+
+    // Standard Setup
+    let mission = Mission("Land on planet via aerocapture",vessel)
+    let con = mission.start()
+
+    land_atmosphere(mission, None())
+
+    mission.end()
+}

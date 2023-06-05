@@ -117,8 +117,13 @@ pub sync fn change_pe_at_ap(vessel: Vessel, new_pe: float) -> Node = {
     return Node(t_ap.value,dv)
 }
 
-pub sync fn change_ap_at_pe(vessel: Vessel, pe: float) -> Node = {
-    return ErrorNode() 
+pub sync fn change_ap_at_pe(vessel: Vessel, new_ap: float) -> Node = {
+    let t_pe = vessel.orbit.next_periapsis_time()
+    let pe = vessel.orbit.periapsis
+    let v_pe = vv_alt(vessel.orbit,pe)
+    let v_new = vv_axis(vessel.orbit,pe,(pe+2*vessel.orbit.reference_body.radius+new_ap)/2)
+    let dv = (v_new-v_pe)*vessel.orbit.horizontal(t_pe)
+    return Node(t_pe,dv)
 }
 
 pub sync fn circularize_at_ap(vessel: Vessel) -> Node = {
@@ -130,7 +135,7 @@ pub sync fn circularize_at_ap(vessel: Vessel) -> Node = {
 }
 
 pub sync fn circularize_at_pe(vessel: Vessel) -> Node = {
-    return ErrorNode()    
+    return change_ap_at_pe(vessel, vessel.orbit.periapsis)     
 }
 
 // Burn a node in the Vacuum. This is surprisingly hard.

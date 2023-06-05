@@ -2,19 +2,22 @@
 // Base class to carry all mission state
 //
 
-use { Vessel, VesselSituation, AutopilotMode, DeltaVSituation } from ksp::vessel
+use { Vessel, VesselSituation, AutopilotMode, DeltaVSituation, ParachuteSafeStates } from ksp::vessel
+use { GeoCoordinates, find_body } from ksp::orbit
 use { sleep, current_time, wait_until, yield } from ksp::game
 use { warp_to } from ksp::game::warp
-use { CONSOLE } from ksp::console
+use { CONSOLE, RED, GREEN } from ksp::console
+use { vec2, vec3, Vec3 } from ksp::math
+use { DEBUG } from ksp::debug
 
 use { acos_deg, clamp, sqrt, PI, min, max, abs } from core::math
 use { format } from core::str
 
-use { warning, panic, pretty_time } from glib::display
-use { Node, ErrorNode, circularize_at_ap, change_pe_at_ap } from glib::maneuver_vacuum
+use { warning, panic, pretty_time, pretty_trend } from glib::display
+use { Node, ErrorNode, circularize_at_ap, circularize_at_pe, change_pe_at_ap, change_ap_at_pe } from glib::maneuver_vacuum
 use { Mission } from glib::mission
 
-// Burn a maneuver node that is part of an athmospheric ascent
+// Burn a maneuver node that is part of an atmospheric ascent
 // This means:
 // - We don't trust the built-in nodes
 // - Set AP to holding horizontal, don't follow maneuver
@@ -115,6 +118,10 @@ pub fn burnNextNodeAtm(mission: Mission, ap_target: float) -> Unit = {
     node.remove()
 }
 
+// Launch the vessel from a planet with an atmosphere into orbit
+// - It doesn't trust maneuver nodes until it is in space
+// - Less likely to overshoot apoapsis
+
 pub fn launch_atmosphere(mission: Mission, target_apoapsis: float, 
                           turn_min: float, turn_max: float, heading: float) -> Unit = {
 
@@ -122,7 +129,7 @@ pub fn launch_atmosphere(mission: Mission, target_apoapsis: float,
     const con = mission.console.value
 
     // If we are landed or pre-launch, launch
-    if (vessel.situation == VesselSituation.Landed || vessel.situation == VesselSituation.PreLaunch) {
+    if (vessel.situation == VesselSituation.Landed || vessel.situation == VesselSituation.PreLaunch) {4
         con.log("Vessel is on the ground. Launch.")
         vessel.set_throttle(1)
         mission.stage()
@@ -130,10 +137,10 @@ pub fn launch_atmosphere(mission: Mission, target_apoapsis: float,
     }
 
     // calculate gravity turn altitudes
-    const ath_depth = vessel.main_body.atmosphere_depth
-    const turn_min_alt = ath_depth * turn_min
-    const turn_max_alt = ath_depth * turn_max
-    const initial_alt = max(target_apoapsis*0.9,ath_depth*1.05)
+    const atm_depth = vessel.main_body.atmosphere_depth
+    const turn_min_alt = atm_depth * turn_min
+    const turn_max_alt = atm_depth * turn_max
+    const initial_alt = max(target_apoapsis*0.9,atm_depth*1.05)
 
     con.log(format("Target Apoapsis {0:N}, heading {1:N} deg.", (target_apoapsis, heading)))
     con.h4 = format("Gravity turn starting at {0:N}m", turn_min_alt)
@@ -175,7 +182,7 @@ pub fn launch_atmosphere(mission: Mission, target_apoapsis: float,
     let n = circularize_at_ap(vessel)
     let n1 = Node(n.time-20,n.delta_v*0.95)
     mission.addManeuver(n1)
-    const ap_step = max( max(ath_depth*1.05,target_apoapsis*0.98), vessel.orbit.apoapsis.value)
+    const ap_step = max( max(atm_depth*1.05,target_apoapsis*0.98), vessel.orbit.apoapsis.value)
     mission.burnNextNodeAtm(ap_step)
     con.log("1st burn complete.")
 
@@ -192,5 +199,137 @@ pub fn launch_atmosphere(mission: Mission, target_apoapsis: float,
         mission.burnNextNode()
     }
 
-    con.log("Athmospheric launch complete.")
+    con.log("Atmospheric launch complete.")
+}
+
+// Land on a body with atmosphere 
+// - assumes we have a parachute, won't use engines for braking
+// - will not stage to a second burn stage (for now)
+// - assumes low-ish orbit (will lower & circularize if necessary)
+// - completely ignored latitude, assumes everything is on the equator
+
+pub fn land_atmosphere(mission: Mission, landing_site_maybe : Option<GeoCoordinates>) -> Unit = {
+
+    const vessel = mission.vessel
+    const con = mission.console.value
+
+    const body = vessel.main_body
+    const atm_depth = body.atmosphere_depth
+    const frame = vessel.main_body.celestial_frame
+
+    con.log("Initiating atmospheric landing.")
+
+    if (!vessel.orbit.apoapsis.defined) {
+        panic("land_atmosphere called without apoapsis, aborting.")
+        return
+    }
+
+    // Check parachutes
+    let chutes = 0
+    let last_chute = 0
+    con.log("  checking parachutes")
+    for (i in 0..vessel.parts.length) {
+        let p = vessel.parts[i]
+        if (p.is_parachute) {
+            con.log(format("    {0}",(p.part_name)))
+            last_chute = i
+            chutes += 1
+        }
+    }
+
+    if (chutes == 0) {
+        panic("No parachute found!")
+        return
+    }
+    const test_chute = vessel.parts[last_chute].parachute.value
+
+    // Periapsis outside of atmosphere. Plan a controlled landing.
+    if ( vessel.orbit.periapsis > body.atmosphere_depth ) {
+
+        if ( vessel.orbit.periapsis > body.atmosphere_depth*1.1 ) {
+            // Lower orbit to atmosphere +5% if possible
+            const alt_target = min(vessel.orbit.periapsis,atm_depth*1.05)
+            con.log(format("  lowering to circular orbit at {0:N0} m",(alt_target)))
+            mission.addManeuver(change_pe_at_ap( vessel,alt_target ))
+            mission.burnNextNode()
+            mission.addManeuver(circularize_at_pe(vessel))
+            mission.burnNextNode()
+        }
+
+        let landing_site = body.geo_coordinates ( 0,0 )
+
+        // Figure out where we need to deorbit
+        if (landing_site_maybe.defined) {
+            landing_site = landing_site_maybe.value
+        } else {
+            // Find a good spot. First, find the day side of the body
+            const v_kerbol = find_body("Kerbol").value.global_position
+            const v_body   = body.global_position
+            const v_vessel = vessel.global_position
+            
+            // Calculate the angle between the two vectors Kerbol->Kerbin and Kerbol->Vessel
+            const d_kerbol = (v_kerbol-v_body).normalized
+            const d_vessel = (v_vessel-v_body).normalized
+
+            const dl_kerbol = d_kerbol.to_local(frame)
+            const dl_vessel = d_vessel.to_local(frame)
+
+            //let vvv1 = DEBUG.add_vector(fn() -> v_vessel, fn() -> d_kerbol*50, RED, "Kerbol", 1)
+            //let vvv2 = DEBUG.add_vector(fn() -> v_vessel, fn() -> d_vessel*50, GREEN, "Vessel", 1)            
+
+            // Now we can calculate the angle to the point facing Kerbol (and having best light)
+            const angle = dl_kerbol.angle_to(dl_vessel)
+            con.log(format("Angle: {0:N1}",(angle)))
+            
+            // Next, are we moving towards that point or away?
+            const vl_vessel = vessel.global_velocity.to_local(frame)
+            const direction = vl_vessel.dot(dl_kerbol)
+
+            // Correct relative if we are moving away from it
+            let angle_max_sun = angle
+            if (direction < 0) {
+                angle_max_sun = 360-angle
+            }
+
+            // Calculate lat/long from current position of spacecraft plus angle
+            const lat = 0
+            const long = vessel.geo_coordinates.longitude+angle_max_sun % 360
+            landing_site = body.geo_coordinates ( lat,long )
+            con.log(format("  landing site: {0:N1}/{1:N1}  (ship: {4:N1} angle: +{2:N1} trend: {3})",
+                                (lat, long, angle, pretty_trend(direction),vessel.geo_coordinates.longitude)) )
+        }
+        let ground = DEBUG.add_ground_marker(landing_site, RED, 0)
+
+        // Location picked, let's land there.
+        const deorbit_angle = 90 // This is how much earlier we deorbit before the landing site. Should be simulated.
+        const rel_angle = landing_site.longitude - vessel.geo_coordinates.longitude - deorbit_angle +720 % 360
+        const dt = rel_angle/360*vessel.orbit.period
+        con.log(format("  rel angle to deorbit: {0:N} eta {1}",(rel_angle,dt)))
+
+        // Determine dV needed to reduce periapsis to zero
+        let n = change_pe_at_ap(vessel, 0)
+
+        // Burn this amount of dV, but right time and direction
+        n.time = current_time()+dt
+        n.delta_v = -vessel.orbit.global_velocity(n.time).to_local(frame).normalized*n.delta_v.magnitude
+        mission.addManeuver(n)
+        mission.burnNextNode()
+        
+    } else {
+        con.log(format("  periapsis at {0:N0} m below atmosphere {1:N0} m",(vessel.orbit.periapsis, atm_depth)))
+    }
+
+    // Periapsis inside of the athmosphere. We land.
+
+    // Detach the last rocket stage, next are parachutes
+    mission.stage()
+    vessel.autopilot.mode = AutopilotMode.Retrograde
+    con.log("  waiting for altitude.")
+    wait_until(fn() -> vessel.altitude_terrain < 5000)
+    con.log("  waiting for parachute to be safe.")
+    wait_until(fn() -> test_chute.chute_safety == ParachuteSafeStates.SAFE)
+    con.log("  parachute is safe. Deploying")
+    mission.stage()   
+    while( !mission.landed() ) con.update1()
+    con.log(format("Welcome to {0}, alt {1:N0}",(body.name,vessel.altitude_terrain)))
 }

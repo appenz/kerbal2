@@ -33,6 +33,12 @@ pub sync fn pretty_time(time : float) -> string = {
     return time.to_int.to_string()+" s"
 }
 
+// Pretty print direction
+pub sync fn pretty_trend(trend : float) -> string = {
+    if (trend > 0) return "increasing"
+    return "decreasing"
+}
+
 impl Display {
 
     // Rewrite top two lines with mission name, time etc.
@@ -90,6 +96,10 @@ impl Display {
         self.update()
         yield()
     }
+
+    //fn flog(self, str : string, params : T) -> Unit = {
+    //    self.log(format(str, params))
+    //}
 
     // Initialize the console
     fn start(self, mission : glib::mission::Mission)-> Unit = { 
