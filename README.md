@@ -1,3 +1,3 @@
 # Kerbal Space Program 2
 
-Scripts to launch - and crash - rockets.
+Automation for KSP2 written with KontrolSystem2.
