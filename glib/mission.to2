@@ -13,11 +13,16 @@ use { format } from core::str
 use { warning, panic, pretty_time } from glib::display
 use { Node, ErrorNode, burnNextNodeVac } from glib::maneuver_vacuum
 use { burnNextNodeAtm } from glib::maneuver_atmosphere
+use { Universe, Locations } from glib::utility
 
 pub struct Mission(mission_name : string, myvessel: Vessel) {
 
     // Subcomponents
     console : Option<glib::display::Display> = glib::display::Display_None()
+
+    // Global Variables
+    universe : Universe = Universe()
+    locations : Locations = Locations()
 
     // Mission Parameters
     name : string = mission_name

@@ -1,0 +1,93 @@
+use { Vessel } from ksp::vessel
+use { GeoCoordinates, find_body, Body } from ksp::orbit
+use { sleep, current_time, wait_until, yield } from ksp::game
+use { CONSOLE } from ksp::console
+
+use { acos_deg, clamp, sqrt, PI, min, max, abs } from core::math
+use { format } from core::str
+
+use { Mission } from glib::mission
+
+pub struct Universe() {
+    KERBOL  : Body = find_body("Kerbol").value
+    KERBIN  : Body = find_body("Kerbin").value
+    MUN     : Body = find_body("Mun").value
+    MINIMUS : Body = find_body("Minimus").value
+}
+
+pub struct Locations() {
+    KerbalSpaceCenter : GeoCoordinates = find_body("Kerbin").value.geo_coordinates(0,-74.8296)
+}
+
+pub fn angle_diff(a: float, b: float) -> float = {
+    return (a - b + 180 + 720) % 360 - 180
+}
+
+// Find the center latitude of the sunny side of the planet in Kerbol system
+
+pub fn lat_sunny_side(mission : Mission) -> float = {
+    const vessel = mission.vessel
+    const body = vessel.main_body
+    const frame = vessel.main_body.celestial_frame
+
+    // Find a good spot. First, find the day side of the body
+    const v_kerbol = mission.universe.KERBOL.global_position
+    const v_body   = body.global_position
+    const v_vessel = vessel.global_position
+    
+    // Calculate the angle between the two vectors Kerbol->Kerbin and Kerbol->Vessel
+    const d_kerbol = (v_kerbol-v_body).normalized
+    const d_vessel = (v_vessel-v_body).normalized
+
+    const dl_kerbol = d_kerbol.to_local(frame)
+    const dl_vessel = d_vessel.to_local(frame)
+
+    //let vvv1 = DEBUG.add_vector(fn() -> v_vessel, fn() -> d_kerbol*50, RED, "Kerbol", 1)
+    //let vvv2 = DEBUG.add_vector(fn() -> v_vessel, fn() -> d_vessel*50, GREEN, "Vessel", 1)            
+
+    // Now we can calculate the angle to the point facing Kerbol (and having best light)
+    const angle = dl_kerbol.angle_to(dl_vessel)
+    
+    // Next, are we moving towards that point or away?
+    const vl_vessel = vessel.global_velocity.to_local(frame)
+    const direction = vl_vessel.dot(dl_kerbol)
+
+    // Correct relative if we are moving away from it
+    let angle_max_sun = angle
+    if (direction < 0) {
+        angle_max_sun = 360-angle
+    }
+    return (angle_max_sun+vessel.geo_coordinates.longitude + 720) % 360
+}
+
+// Find a nice landing spot, meaning:
+// 1. Daylight
+// 2. Ideally at the space center
+// 3. Not in water
+
+pub fn lat_nice_spot(mission : Mission) -> float = {
+    const vessel = mission.vessel
+    const con = mission.console.value
+    const body = vessel.main_body
+    const sun_zenith = lat_sunny_side(mission)
+    let long = 0.0
+
+    let delta_to_ksp = abs( angle_diff(mission.locations.KerbalSpaceCenter.longitude, sun_zenith) )
+    con.log(format("{0} {1} {2}", (delta_to_ksp, mission.locations.KerbalSpaceCenter.longitude, sun_zenith )))
+    if (delta_to_ksp < 90) {
+        return mission.locations.KerbalSpaceCenter.longitude
+    }
+
+    for(i in 0..90) {
+        long = sun_zenith-i % 360
+        if (body.terrain_height(0, long) > 50) {
+            return long
+        }
+        long = sun_zenith+i % 360
+        if (body.terrain_height(0, long) > 50) {
+            return long
+        }
+    }
+
+    return sun_zenith
+}

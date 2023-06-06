@@ -1,12 +1,12 @@
 //
-// Base class to carry all mission state
+// Atmospheric Maneuvers
 //
 
 use { Vessel, VesselSituation, AutopilotMode, DeltaVSituation, ParachuteSafeStates } from ksp::vessel
 use { GeoCoordinates, find_body } from ksp::orbit
 use { sleep, current_time, wait_until, yield } from ksp::game
 use { warp_to } from ksp::game::warp
-use { CONSOLE, RED, GREEN } from ksp::console
+use { CONSOLE, RED, GREEN, BLUE, YELLOW } from ksp::console
 use { vec2, vec3, Vec3 } from ksp::math
 use { DEBUG } from ksp::debug
 
@@ -16,6 +16,7 @@ use { format } from core::str
 use { warning, panic, pretty_time, pretty_trend } from glib::display
 use { Node, ErrorNode, circularize_at_ap, circularize_at_pe, change_pe_at_ap, change_ap_at_pe } from glib::maneuver_vacuum
 use { Mission } from glib::mission
+use { Universe, Locations, lat_sunny_side, lat_nice_spot } from glib::utility
 
 // Burn a maneuver node that is part of an atmospheric ascent
 // This means:
@@ -210,6 +211,8 @@ pub fn launch_atmosphere(mission: Mission, target_apoapsis: float,
 
 pub fn land_atmosphere(mission: Mission, landing_site_maybe : Option<GeoCoordinates>) -> Unit = {
 
+    const deorbit_angle = 87 // This is how much earlier we deorbit before the landing site. Should be simulated.
+
     const vessel = mission.vessel
     const con = mission.console.value
 
@@ -262,48 +265,24 @@ pub fn land_atmosphere(mission: Mission, landing_site_maybe : Option<GeoCoordina
         if (landing_site_maybe.defined) {
             landing_site = landing_site_maybe.value
         } else {
-            // Find a good spot. First, find the day side of the body
-            const v_kerbol = find_body("Kerbol").value.global_position
-            const v_body   = body.global_position
-            const v_vessel = vessel.global_position
-            
-            // Calculate the angle between the two vectors Kerbol->Kerbin and Kerbol->Vessel
-            const d_kerbol = (v_kerbol-v_body).normalized
-            const d_vessel = (v_vessel-v_body).normalized
-
-            const dl_kerbol = d_kerbol.to_local(frame)
-            const dl_vessel = d_vessel.to_local(frame)
-
-            //let vvv1 = DEBUG.add_vector(fn() -> v_vessel, fn() -> d_kerbol*50, RED, "Kerbol", 1)
-            //let vvv2 = DEBUG.add_vector(fn() -> v_vessel, fn() -> d_vessel*50, GREEN, "Vessel", 1)            
-
-            // Now we can calculate the angle to the point facing Kerbol (and having best light)
-            const angle = dl_kerbol.angle_to(dl_vessel)
-            con.log(format("Angle: {0:N1}",(angle)))
-            
-            // Next, are we moving towards that point or away?
-            const vl_vessel = vessel.global_velocity.to_local(frame)
-            const direction = vl_vessel.dot(dl_kerbol)
-
-            // Correct relative if we are moving away from it
-            let angle_max_sun = angle
-            if (direction < 0) {
-                angle_max_sun = 360-angle
-            }
-
-            // Calculate lat/long from current position of spacecraft plus angle
+            // Find the latitude with the sun overhead
+            const lat_sun = lat_sunny_side(mission)
+            const long = lat_nice_spot(mission)
             const lat = 0
-            const long = vessel.geo_coordinates.longitude+angle_max_sun % 360
             landing_site = body.geo_coordinates ( lat,long )
-            con.log(format("  landing site: {0:N1}/{1:N1}  (ship: {4:N1} angle: +{2:N1} trend: {3})",
-                                (lat, long, angle, pretty_trend(direction),vessel.geo_coordinates.longitude)) )
+            con.log(format("  landing site: {0:N1}/{1:N1}  (ship: {2:N1})",
+                                (lat, long, vessel.geo_coordinates.longitude)) )
+            let sunny_marker = DEBUG.add_ground_marker(body.geo_coordinates ( 0,lat_sun ), YELLOW, 0)
         }
         let ground = DEBUG.add_ground_marker(landing_site, RED, 0)
+        let origin = DEBUG.add_ground_marker(body.geo_coordinates ( 0,0 ), BLUE, 0)
 
         // Location picked, let's land there.
-        const deorbit_angle = 90 // This is how much earlier we deorbit before the landing site. Should be simulated.
-        const rel_angle = landing_site.longitude - vessel.geo_coordinates.longitude - deorbit_angle +720 % 360
-        const dt = rel_angle/360*vessel.orbit.period
+        const rel_angle = (landing_site.longitude - vessel.geo_coordinates.longitude - deorbit_angle + 720) % 360
+
+        // Correct for rotation
+        let rot_corr = 1+vessel.orbit.period/body.rotation_period 
+        const dt = rel_angle/360*vessel.orbit.period*rot_corr
         con.log(format("  rel angle to deorbit: {0:N} eta {1}",(rel_angle,dt)))
 
         // Determine dV needed to reduce periapsis to zero
