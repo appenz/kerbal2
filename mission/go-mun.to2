@@ -1,0 +1,39 @@
+use { Vessel } from ksp::vessel
+use { Mission } from glib::mission
+use { launch_atmosphere } from glib::maneuver_atmosphere
+use { Transfer } from glib::transfer
+use { circularize_at_pe } from glib::maneuver_vacuum
+
+pub fn main_flight(vessel: Vessel, target_apoapsis: int = 80000) -> Unit = {
+
+    // Standard Setup
+    let mission = Mission("To the Mun!",vessel)
+    let con = mission.start()
+
+    // Check if we are still in the process of getting to Orbit
+    if (vessel.orbit.reference_body.name == "Kerbin" && vessel.orbit.periapsis < 75000)
+       launch_atmosphere(mission, target_apoapsis, 0.01, 0.7, 90)
+
+    // We made it to Orbit, are we still around Kerbin
+    if (vessel.orbit.reference_body.name == "Kerbin" && vessel.orbit.apoapsis.defined && vessel.orbit.apoapsis.value < 5000000) {
+        const t = Transfer()
+        t.planTransfer(mission,"Mun", 0.6)
+        const n = t.getTransferNode()
+        mission.addManeuver(n)
+        return
+        mission.burnNextNode()
+        con.log("  ejection burn complete.")
+    }
+
+    // Wait for SOI of the Mun
+    if (vessel.orbit.reference_body.name == "Kerbin") {
+        mission.warpToSOI("Mun")
+    }
+
+    con.log("Lowering Apoapsis.")
+    let n3 = circularize_at_pe(vessel)
+    mission.addManeuver(n3)
+    mission.burnNextNode()
+
+    mission.end()
+}

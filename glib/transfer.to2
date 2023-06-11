@@ -1,0 +1,179 @@
+//
+// Transfers between celestial bodies
+//
+
+use { Vessel, AutopilotMode, VesselSituation, DeltaVSituation  } from ksp::vessel
+use { Body, Orbit, find_body } from ksp::orbit
+use { vec2, vec3, Vec3 } from ksp::math
+use { CONSOLE } from ksp::console
+use { sleep, current_time, wait_until, yield } from ksp::game
+use { warp_to } from ksp::game::warp
+
+use { acos_deg, clamp, sqrt, PI, min, max, acos } from core::math
+use { format } from core::str
+
+use { pretty_time, pretty_dt, warning, panic, debug } from glib::display
+use { rad2deg, deg2rad, deg360 } from glib::utility
+use { vv_alt, vv_axis, Node, ErrorNode } from glib::maneuver_vacuum
+use { Mission } from glib::mission
+
+
+// Pre-calculated transfer table
+// Format is Src, Dst, Altitude/km, Phase Angle, Ejection Angle, Ejection Velocity.
+
+pub struct TransferInfo(psrc: string, pdst: string, palt: int, pa_phase: float, pa_eject: float, pv_eject: float) {
+    src: string = psrc
+    dst: string = pdst
+    alt: float = palt
+    a_phase: float = pa_phase
+    a_eject: float = pa_eject
+    v_eject: float = pv_eject
+}
+
+pub struct Transfer() { 
+    table: TransferInfo[] = [
+        TransferInfo("Kerbin", "Eve",    1000, -54.13,  143.44+180, 2226.01),
+        TransferInfo("Kerbin", "Duna",   1000,  44.36,  138.75,     2267.83),
+        TransferInfo("Kerbin", "Dres",   1000,  82.06,  110.16,     2934.47),
+        TransferInfo("Kerbin", "Jool",   5000,  96.58,  94.64,      2903.80),
+        TransferInfo("Duna",   "Kerbin",  500, -75.19,  110.68+180, 1186.75),
+        TransferInfo("Eve",    "Kerbin",  500,  36.07,  159.13,     3754.75),
+        TransferInfo("Dres",   "Kerbin",  500,-329.68,  90.77+180,  1589.12)
+    ]
+
+    src : string = "source"
+    dst : string = "dst"
+    alt : float = 0
+    alt_new : float = 0
+    a_phase : float = 0
+    a_eject : float = 0
+    v_eject : Vec3 = vec3(0,0,0)
+    t_eject : float = 0
+    t_transfer : float = 0
+}
+
+impl Transfer {
+
+    // Calculate correct phase angle for a Hohmann Transfer
+    sync fn hohmannPhaseAngle(self, alt_start: float, alt_end: float, o: Orbit) -> float = {
+        return 180*(1-(1/(2*sqrt(2))*sqrt((1+(alt_start+o.reference_body.radius)/(alt_end+o.reference_body.radius))^3)))
+    }
+
+    // Time needed for Hohmann transfer from alt1->alt2
+
+    sync fn hohmannTime(self, orbit: Orbit, new_ap: float, time: float) -> float = {
+        return PI*( (orbit.radius(time)+new_ap+2*orbit.reference_body.radius)^3/(8*orbit.reference_body.grav_parameter) )^0.5
+    }
+
+    // Current True Anomaly in deg. Will work even with circular/eccentric orbits
+    sync fn trueAnomaly( self, o: Orbit) -> float = {
+
+        let radius = o.radius(current_time())
+        radius = max(radius, o.periapsis_radius)
+        radius = min(radius, o.apoapsis_radius.value)
+        const ta = o.true_anomaly_from_vector(o.relative_position(current_time()))
+ 
+        debug("    trueAnomaly:"+o.true_anomaly_at_radius(radius).to_string()+" / "+ta.to_string())
+        return rad2deg(ta)
+    }
+
+    // Calculate the phase angle between two Orbits around the same body
+    fn phaseAngle( self, src: Orbit, dst: Orbit ) -> float = {
+        
+        // Ensure both orbit the same body
+        if (src.reference_body.name != dst.reference_body.name) {
+            panic(format("phase_angle called for orbits around different objects {0} vs {1}",
+                        (src.reference_body.name, dst.reference_body.name)))
+                        return 0
+        }
+
+        // Regular orbit
+        const a_src = src.LAN + src.argument_of_periapsis + self.trueAnomaly(src) 
+        const a_dst = dst.LAN + dst.argument_of_periapsis + self.trueAnomaly(dst) 
+        return deg360(a_dst-a_src)
+    }
+
+    // DeltaV to a new, higher orbit. Requires altitude (not radius)
+    sync fn transferDeltaV(self, orbit: Orbit, new_ap: float, time: float) -> Vec3 = {
+        const alt = orbit.radius(time)-orbit.reference_body.radius
+        const v_old = vv_alt(orbit,alt)
+        const v_new = vv_axis(orbit,alt,(alt+2*orbit.reference_body.radius+new_ap)/2)
+        const dv = (v_new-v_old)*orbit.horizontal(time)
+        return dv
+    }
+
+    //
+    // Plan a simple transfer within a star system to a body in a higher orbit
+    // - Planned transfer will be recorded in phase angle and ejection angle, velocity & time
+    // - Function will not check if this actually results in an encounter
+
+    fn planTransfer(self, mission: Mission, dst:string, soi_adjust: float)-> Unit = { 
+        let con  = mission.console.value
+        let vessel = mission.vessel
+        let orbit = vessel.orbit
+        self.src = orbit.reference_body.name
+        self.dst = dst
+
+        const t = self.table
+        if ( !find_body(dst).success ) {
+            panic(format("Transfer destination {1} not found", (self.dst)))    
+            return
+        }        
+        const body_dst = find_body(self.dst).value
+        con.log(format("Planning Transfer: {0} -> {1}",(self.src, self.dst)))
+
+        // Check if we transfer planet->moon or star->planet (vs. planet to planet)
+
+        if(orbit.reference_body.name == body_dst.orbit.reference_body.name) {
+            // We do the math ourselves
+            // Determine target phase angle
+            self.alt = vessel.orbit.periapsis
+            self.a_phase = self.hohmannPhaseAngle(self.alt, body_dst.orbit.periapsis, orbit)
+            self.a_eject = -1
+            // Determine current phase angle
+            const a_current = self.phaseAngle(orbit, body_dst.orbit)
+            con.log(format("  current/target phase angle: {0:N0} / {1:N0}",(a_current, self.a_phase)))
+            // Get time to reaching that angle. Invert sign.
+            const a_delta = deg360(-self.a_phase+a_current)
+            // Calculate how quickly we are catching up (deg/s), then time until burn
+            const da = 360/orbit.period - 360/body_dst.orbit.period
+            self.t_eject = current_time()+a_delta/da
+            con.log(format("  Angles. rate of change: {0:N5} delta {1:N1} -> time {2:N0}",(da, a_delta, pretty_dt(self.t_eject))))
+            // Estimate altitude we need to burn to. Assume it takes about half an orbit
+            self.alt_new = body_dst.orbit.radius(self.t_eject+body_dst.orbit.period/2)-orbit.reference_body.radius-body_dst.SOI_radius*soi_adjust
+            // Calculate dV needed to the new altitude
+            self.v_eject = self.transferDeltaV(orbit, self.alt_new, self.t_eject)
+
+        } else {
+            // For planet to planet, we don't do math but use pre-computed values
+            for(i in 0..t.length) {
+                if (self.src == t[i].src && self.dst == t[i].dst) {
+                    self.alt = t[i].alt
+                    self.a_phase = t[i].a_phase
+                    self.a_eject = t[i].a_eject
+                    //self.v_eject = t[i].v_eject
+                }
+                panic("Planet to Planet not implemented yet.")
+                return
+            }
+            panic(format("No data found for transfer {0} -> {1}", (self.src, self.dst)))
+        }
+        
+        self.t_transfer = self.hohmannTime(orbit, self.alt_new, self.t_eject)
+        con.log(format("  transfer to alt: {0:N0} m  in {1} ",
+                       ( self.alt_new, pretty_dt(self.t_eject)) ))
+        con.log(format("  eject at phase angle {0:N1}  ejection angle {1:N1}  dV: {2:N} m/s",
+                       (self.a_phase, self.a_eject, self.v_eject.magnitude))) 
+    }
+
+    fn getTransferNode(self)-> Node = { 
+        if (self.t_eject == 0) {
+            panic("Can't add transfer node as none is planned.")
+            return ErrorNode()
+        }
+
+        return Node(self.t_eject, self.v_eject)
+    }
+
+}
+

@@ -14,7 +14,7 @@ pub struct Display() {
     last_update : float = 0
 }
 
-pub sync fn Display_None() -> Option<glib::display::Display> = {
+pub sync fn Display_None() -> Option<Display> = {
     return None()
 }
 
@@ -26,11 +26,32 @@ pub sync fn warning( s : string) -> Unit = {
     CONSOLE.print_line("** Warning: "+s)
 }
 
+pub sync fn debug( s : string) -> Unit = {
+    //CONSOLE.print_line("      Debug: "+s)
+}
+
+
+// Pretty distance print
+pub sync fn pretty_distance(d : float) -> string = {
+    if (d>1000000) 
+        return(format("{0:N0} km", d/1000 ) )
+    if (d>1000) 
+        return(format("{0:N2} km", d/1000 ) )
+    return(format("{0:N1} m", d ) )
+}
+
 
 // Pretty print time
 pub sync fn pretty_time(time : float) -> string = {
     let s = time.to_int
+    if (s>200) 
+        return(format("{0:N0}:{1,2:00}", (s/60, s%60) ) )
     return time.to_int.to_string()+" s"
+}
+
+// Pretty print dt until this time
+pub sync fn pretty_dt(time : float) -> string = {
+    return pretty_time(time-current_time())
 }
 
 // Pretty print direction
@@ -50,11 +71,15 @@ impl Display {
         self.h1 = format("Mission: {0,-20} t: {1,-10}", (mission.name,t))
 
         let vessel = mission.vessel
-        let alt2 = vessel.altitude_terrain
-        let alt = vessel.altitude_scenery 
+        let alt_t = vessel.altitude_terrain
+        let alt = vessel.altitude_sealevel 
         let atm = alt / (vessel.main_body.atmosphere_depth + 1)
+        let atm_s = ""
+        if (atm > 1) atm_s = "in space"
+        else atm_s = format("{0,5:P1}", atm_s)
         let spd = vessel.surface_velocity.magnitude 
-        self.h2 = format("alt: {0,8:N0}/{3,8:N0} m  ({1,5:P1})    v: {2,8:N0} m/s", (alt, atm, spd, alt2))
+        self.h2 = format("body: {0,-10} msl/ter: {1,-10}/{2,-10} atm: ({3,-8:P1}) v: {4:N0} m/s", 
+                        (vessel.orbit.reference_body.name, pretty_distance(alt), pretty_distance(alt_t), atm_s, spd))
 
         // Stage info
         let dv = vessel.delta_v.stage(vessel.staging.current)

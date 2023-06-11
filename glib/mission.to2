@@ -4,21 +4,22 @@
 
 use { Vessel, VesselSituation, AutopilotMode, DeltaVSituation } from ksp::vessel
 use { sleep, current_time, wait_until } from ksp::game
+use { GeoCoordinates, find_body, Body } from ksp::orbit
 use { warp_to } from ksp::game::warp
 use { CONSOLE } from ksp::console
 
 use { acos_deg, clamp, sqrt, PI, min, max, abs } from core::math
 use { format } from core::str
 
-use { warning, panic, pretty_time } from glib::display
+use { warning, panic, pretty_time, pretty_dt, pretty_distance, Display, Display_None } from glib::display
 use { Node, ErrorNode, burnNextNodeVac } from glib::maneuver_vacuum
 use { burnNextNodeAtm } from glib::maneuver_atmosphere
-use { Universe, Locations } from glib::utility
+use { Universe, Locations, find_encounter, find_distance_t, find_distance } from glib::utility
 
 pub struct Mission(mission_name : string, myvessel: Vessel) {
 
     // Subcomponents
-    console : Option<glib::display::Display> = glib::display::Display_None()
+    console : Option<Display> = Display_None()
 
     // Global Variables
     universe : Universe = Universe()
@@ -38,7 +39,7 @@ pub struct Mission(mission_name : string, myvessel: Vessel) {
     stage_delta_v : float = 0
 }
 
-pub sync fn Mission_None() -> Option<glib::mission::Mission> = {
+pub sync fn Mission_None() -> Option<Mission> = {
     return None()
 }
 
@@ -157,6 +158,35 @@ impl Mission {
     // Normal function to burn the next node 
     fn burnNextNode(self) -> Unit = {
         burnNextNodeVac(self)
+    }
+
+    // Warp to the SOI change. This is surprisingly hard.
+    fn warpToSOI(self, dst: string) -> Unit = {
+        const vessel = self.vessel
+        const con = self.console.value
+        const body_dst = find_body(dst).value
+
+        con.log("Warping to SOI")
+
+        let t = find_encounter(vessel, body_dst, body_dst.SOI_radius*0.9)
+        let d = find_distance_t(vessel, body_dst, t)
+
+        con.log(format("  encounter in {0} distance {1}", (pretty_distance(d),pretty_dt(t))))
+
+        warp_to(t)
+        con.h5 = ""
+
+        while(current_time()<t && vessel.orbit.reference_body.name != dst) {
+            con.h4 = format("dst: {0} / POI {1}  ({2:P1})", (pretty_distance(d), pretty_distance(body_dst.SOI_radius), d/body_dst.SOI_radius))
+            con.update1()
+        }
+
+        if(vessel.orbit.reference_body.name == dst) {
+            d = find_distance(vessel, body_dst)
+            con.log(format("  arrived {0:P1} of SOI {1:N0} m/{2:N0} m", (d/body_dst.SOI_radius, pretty_distance(d), pretty_distance(body_dst.SOI_radius))))
+        } else {
+            panic("warp failed, missed target.")
+        }
     }
 
     // Start a Mission. Save time stamp.

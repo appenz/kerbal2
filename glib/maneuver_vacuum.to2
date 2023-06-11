@@ -20,8 +20,14 @@ use { pretty_time, warning, panic } from glib::display
 //
 
 pub struct Node(t : float, dv : Vec3) {
+    // Data for the Maneuver node
     time: float = t
     delta_v: Vec3 = dv
+
+    //  Data from burn time estimation
+    burn_stages: int = 1
+    burn_time: int = 0
+    burn_info: string = "n/a"
 }
 
 impl Node {
@@ -136,6 +142,10 @@ pub sync fn circularize_at_ap(vessel: Vessel) -> Node = {
 
 pub sync fn circularize_at_pe(vessel: Vessel) -> Node = {
     return change_ap_at_pe(vessel, vessel.orbit.periapsis)     
+}
+
+pub fn check_circularized(mission: Mission) -> Unit = {
+    // Ignoring this for now, should have code to circularize if needed     
 }
 
 // Burn a node in the Vacuum. This is surprisingly hard.

@@ -1,4 +1,5 @@
-use { Vessel } from ksp::vessel
+use { Vessel, Targetable } from ksp::vessel
+use { Orbit } from ksp::orbit
 use { GeoCoordinates, find_body, Body } from ksp::orbit
 use { sleep, current_time, wait_until, yield } from ksp::game
 use { CONSOLE } from ksp::console
@@ -6,6 +7,7 @@ use { CONSOLE } from ksp::console
 use { acos_deg, clamp, sqrt, PI, min, max, abs } from core::math
 use { format } from core::str
 
+use { warning, panic, pretty_distance, pretty_time, pretty_dt } from glib::display
 use { Mission } from glib::mission
 
 pub struct Universe() {
@@ -19,8 +21,56 @@ pub struct Locations() {
     KerbalSpaceCenter : GeoCoordinates = find_body("Kerbin").value.geo_coordinates(0,-74.8296)
 }
 
+sync pub fn rad2deg(r: float) -> float = {
+    return r*180.0/PI
+}
+
+sync pub fn deg2rad(d: float) -> float = {
+    return d/180.0*PI
+}
+
+// Return degrees in the range 0-360
+sync pub fn deg360(d: float) -> float = {
+    return (d+3600.0) % 360
+}
+
 pub fn angle_diff(a: float, b: float) -> float = {
     return (a - b + 180 + 720) % 360 - 180
+}
+
+// Calculate the distance between two targetables at time t
+pub fn find_distance_t(t1: Targetable, t2: Targetable, t: float) -> float = {
+    const p1 = t1.orbit.global_position(t)
+    const p2 = t2.orbit.global_position(t)
+    return p1.distance(p2)
+}
+
+pub fn find_distance(t1: Targetable, t2: Targetable) -> float = {
+    return find_distance_t(t1,t2,current_time())
+}
+
+// Find the earliest time when two targtables come within a certain distance
+// - Uses gradient descent
+// - Returns time to closest encounter if it can't go below distance
+pub fn find_encounter(t1: Targetable, t2: Targetable, distance: float) -> float = {
+    const speed = 0.01
+    let i = 0
+    let t = current_time()
+    let dx = 1.0
+    let d_best = distance+1
+    while( dx > 0 && d_best > distance) {
+        i += 1
+        const d_now = find_distance_t(t1,t2,t)
+        dx = d_now-find_distance_t(t1,t2,t+1)
+        if(dx > 0) {
+            t = t+d_now/dx*speed
+        }
+        d_best = find_distance_t(t1,t2,t)
+        //const s = format("{0,4:N0} {1} in {2}",(i,pretty_distance(d_best), pretty_dt(t)))
+        //warning(s)
+    }
+
+    return t
 }
 
 // Find the center latitude of the sunny side of the planet in Kerbol system
@@ -74,7 +124,8 @@ pub fn lat_nice_spot(mission : Mission) -> float = {
 
     let delta_to_ksp = abs( angle_diff(mission.locations.KerbalSpaceCenter.longitude, sun_zenith) )
     con.log(format("{0} {1} {2}", (delta_to_ksp, mission.locations.KerbalSpaceCenter.longitude, sun_zenith )))
-    if (delta_to_ksp < 90) {
+    if (delta_to_ksp < 90 && body.name == "Kerbin") {
+        con.log("Kerbal Space Center has daylight, landign there.")
         return mission.locations.KerbalSpaceCenter.longitude
     }
 
