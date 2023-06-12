@@ -42,12 +42,18 @@ pub struct bar3() {
     foo1 : Option<test::classes::foo>  = no_foo()
 }
 
-// I didn't find a way to do this inline with a lambda function.
-
-pub struct bar4() {
-    // foo1 : Option<test::classes::foo> = fn() -> test::classes::foo()
+pub struct arrayTest() {
+    list: int[ ] = [1,2,3]
 }
 
+pub struct arrayTest2() {
+    list2: arrayTest[] = [arrayTest()]
+}
+
+pub struct arrayTest3() {
+    a: arrayTest = arrayTest()
+    b: arrayTest2 = arrayTest2()
+}
 
 fn main_flight(vessel: Vessel) -> Unit = {
     
@@ -58,6 +64,9 @@ fn main_flight(vessel: Vessel) -> Unit = {
     let f : Option<test::classes::foo> = None()
     let b2 = bar2(f)
     let f2 = b2.foo1
+
+    // Function works too
+    let b3 = bar3()
 
     CONSOLE.print_line("success.")
 }

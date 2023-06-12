@@ -29,6 +29,8 @@ pub struct Mission(mission_name : string, myvessel: Vessel) {
     name : string = mission_name
     vessel : Vessel = myvessel
     start_time : float = 0.0
+    stage_delay_pre : float = 1
+    stage_delay_post : float = 2
 
     // Stage parameters for easy access
     stage : int = 0
@@ -141,7 +143,8 @@ impl Mission {
     fn addManeuver(self, n: Node) -> Unit = {
         const burn_time = n.estBurnTime(self.vessel)
         self.vessel.maneuver.add_burn_vector(n.time - burn_time/2, n.delta_v)
-        self.console.value.log("Planned maneuver: "+n.to_string()+"  burn: "+pretty_time(burn_time))
+        self.console.value.log("Maneuver: "+n.to_string()+"  burn: "+pretty_time(burn_time))
+        self.console.value.log("    "+n.burn_info)
     }
 
     fn clearNodes(self) -> Unit = {
@@ -229,9 +232,9 @@ impl Mission {
     }
 
     fn stage(self)-> Unit = {
-        sleep(1)
+        sleep(self.stage_delay_pre)
         self.vessel.staging.next()
-        sleep(2)
+        sleep(self.stage_delay_post)
         self.new_stage(true)
     }
 }

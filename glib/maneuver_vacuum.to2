@@ -9,11 +9,12 @@ use { CONSOLE } from ksp::console
 use { sleep, current_time, wait_until, yield } from ksp::game
 use { warp_to } from ksp::game::warp
 
-use { acos_deg, clamp, sqrt, PI, min, max } from core::math
+use { acos_deg, clamp, sqrt, PI, min, max, exp, log } from core::math
 use { format } from core::str
 
 use { Mission } from glib::mission
-use { pretty_time, warning, panic } from glib::display
+use { pretty_time, pretty_dt,  warning, panic } from glib::display
+use { deg360 } from glib::utility
 
 //
 // Maneuver Node and helper functions
@@ -26,8 +27,9 @@ pub struct Node(t : float, dv : Vec3) {
 
     //  Data from burn time estimation
     burn_stages: int = 1
-    burn_time: int = 0
+    burn_time: float = 0
     burn_info: string = "n/a"
+    burn_possible: bool = false
 }
 
 impl Node {
@@ -49,24 +51,74 @@ impl Node {
 
     // Estimate burn time for the node. Assume all in a single (current) stage
     sync fn estBurnTime(self, vessel: Vessel) -> float = {
-        const maybe_stage_info = vessel.delta_v.stage(vessel.staging.current)
-        if(!maybe_stage_info.defined) return -1
 
-        const stage_info = maybe_stage_info.value
-        const stage_deltav = stage_info.get_deltav(DeltaVSituation.Vaccum)
-        if (stage_deltav < self.delta_v.magnitude) {
-            warning(format("Insufficient dv: {0:N1} m/s need {1:N1} m/s", (stage_deltav, self.delta_v.magnitude)))
-            return 120    
+        // Plan: We need to step through every remaining stage, and calculate burn time for the stage
+        let stage = vessel.staging.count
+        let dv_remaining = self.delta_v.magnitude
+        self.burn_time = 0.0
+        self.burn_stages = 0
+        self.burn_info = "stages: "
+
+        while(stage > 0 && dv_remaining > 0) {
+            stage -= 1
+
+            const maybe_stage_info = vessel.delta_v.stage(stage)
+            if(!maybe_stage_info.defined) continue
+
+            const stage_info = maybe_stage_info.value
+            const dv_stage = stage_info.get_deltav(DeltaVSituation.Vaccum)
+            const thrust = stage_info.get_thrust(DeltaVSituation.Vaccum)
+
+            if (dv_stage == 0 || thrust == 0) {
+                self.burn_time += 3 
+                continue
+            }
+
+            // Calculate how much of total dv of this stage will we use
+            const mass_start = stage_info.start_mass
+            const mass_end = stage_info.end_mass
+            const dv_burn = min(dv_stage, dv_remaining)
+            const dv_fraction = dv_burn/dv_stage
+
+            // Copied from KS2's github repo. Calculate average acceleration
+            const stage_burn_final_mass = mass_start / exp(log(mass_start / mass_end) * dv_fraction)
+            const stage_avg_accel = thrust / ((mass_start + stage_burn_final_mass) / 2)
+
+            // Account for weight change during burn
+            const t_stage = dv_burn/stage_avg_accel
+
+            // Don't need this now, but eventually we may want to do things differently based on the type of engine
+            const eng_c = stage_info.active_engines.length
+            let eng_name = "unknown_engine"
+            if( eng_c > 0) eng_name = eng_c.to_string()+"x "+stage_info.active_engines[0].engine_module.engine_modes[0].engine_type.to_string()
+            
+            // Update overall
+            dv_remaining -= dv_burn
+            self.burn_time += t_stage
+            self.burn_stages += 1
+            self.burn_info += format("[#{0}  dv:{1,5:N0} m/s t: {2} {3}]\n\r", 
+                            (stage, dv_burn, pretty_time(t_stage), eng_name))
+
+        }
+    
+        // Check if success, if yes return time
+        if (dv_remaining < 0.01) {
+            self.burn_possible = false
+            return self.burn_time
         }
 
-        const stage_thrust = stage_info.get_thrust(DeltaVSituation.Vaccum)
-
-        return min(self.delta_v.magnitude/(stage_thrust/vessel.mass), stage_info.burn_time)
+        // Don't have enough deltaV left
+        self.burn_possible = false
+        self.burn_time = 0
+        self.burn_stages = 0
+        self.burn_info = "Unable to burn node, insufficient dV"
+        return self.burn_time
     }
 
     sync fn to_string(self) -> string = {
         let t = glib::display::pretty_time(self.time-current_time())
-        return format("dt: {0}  dV: {1:N1} m/s", (t,self.delta_v.magnitude))    
+        return format("dt: {0}  dV: {1:N1} m/s stages: {2} burn: {3}", 
+                        (t,self.delta_v.magnitude,self.burn_stages,pretty_time(self.burn_time)))    
     }
 
 }
@@ -108,6 +160,34 @@ pub sync fn vv_circular(orbit: Orbit, r: float) -> float = {
   return vv_axis(orbit, r, r+orbit.reference_body.radius)
 }
 
+// Match vessel inclination with a specific orbit
+pub sync fn change_incl(vessel: Vessel, target_orbit: Orbit) -> Node = {
+    const frame = vessel.main_body.celestial_frame
+    const t = current_time()
+    const ma_v = vessel.orbit.mean_anomaly_at_ut(t)
+    const dn_ta = vessel.orbit.descending_node_true_anomaly(target_orbit)
+    const an_ta = vessel.orbit.ascending_node_true_anomaly(target_orbit)
+    const dt_dn = (( dn_ta-ma_v )/vessel.orbit.mean_motion + vessel.orbit.period) % vessel.orbit.period
+    const dt_an = (( an_ta-ma_v )/vessel.orbit.mean_motion + vessel.orbit.period) % vessel.orbit.period
+
+    // Pick whichever we hit first
+    let t_node = t+min(dt_an, dt_dn)
+
+    const v_vessel = vessel.orbit.global_velocity(t_node).to_local(frame)
+    const dv_mag = -target_orbit.orbit_normal.normalized.dot(v_vessel)
+    const dv = dv_mag*vessel.orbit.orbit_normal
+    //warning(format("{0:N3} {1:N3} delta: {2:N3} mean_v: {3:N4} t: {4}", (ma_v, dn_ta, (dn_ta-ma_v), vessel.orbit.mean_motion, pretty_dt(t_node) )))
+    return Node(t_node,dv)
+}
+
+// Adjust inclination with multiple burns until we have sufficient precision
+//pub sync fn change_incl(vessel: Vessel, target_orbit: Orbit) {
+
+//    while (true) {
+//        let incl = 
+//    }
+//}
+
 // Chage the Periapsis at the next Apoapsis
 
 pub sync fn change_pe_at_ap(vessel: Vessel, new_pe: float) -> Node = {
@@ -144,10 +224,6 @@ pub sync fn circularize_at_pe(vessel: Vessel) -> Node = {
     return change_ap_at_pe(vessel, vessel.orbit.periapsis)     
 }
 
-pub fn check_circularized(mission: Mission) -> Unit = {
-    // Ignoring this for now, should have code to circularize if needed     
-}
-
 // Burn a node in the Vacuum. This is surprisingly hard.
 
 pub fn burnNextNodeVac(mission: Mission) -> Unit = {
@@ -157,12 +233,12 @@ pub fn burnNextNodeVac(mission: Mission) -> Unit = {
     const node_result = vessel.maneuver.next_node()
 
     if (!node_result.success) {
-        warning("Called burn_node with no maneuver node set.")
+        panic("Called burn_node with no maneuver node set.")
         return
     }
 
     if (mission.stage_thrust == 0) {
-        panic("Calling burnNextNode with zero thrust!")
+        warning("Calling burnNextNode with zero thrust!")
         return
     }
 
@@ -193,7 +269,7 @@ pub fn burnNextNodeVac(mission: Mission) -> Unit = {
         t = current_time()
         dv = target_orbit.global_velocity(t).to_relative(frame) - vessel.orbit.global_velocity(t).to_relative(frame)
         burn_time = dv.magnitude/(mission.stage_thrust/vessel.mass)
-        throttle = clamp(burn_time, 0.01,1.0)
+        throttle = clamp(burn_time/2, 0.01,1.0)
 
         if( mission.flameout() ) {
             con.log("Flameout.")
@@ -202,12 +278,12 @@ pub fn burnNextNodeVac(mission: Mission) -> Unit = {
             t_end += 5      
         }
 
-        if (t > t_end+5) {
+        if (t > t_end+10) {
             con.log("  stop burn due to time exceeded.")
             stop = true
         }
 
-        if (dv.magnitude > dv_min*1.1) {
+        if (dv.magnitude > dv_min*1.05) {
             con.log(format("  stop burn due to dv increase dv: {0:N1} m/s",(dv.magnitude)))
             stop=true 
         }

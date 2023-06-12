@@ -2,17 +2,24 @@ use { Vessel } from ksp::vessel
 use { Mission } from glib::mission
 use { launch_atmosphere } from glib::maneuver_atmosphere
 use { Transfer } from glib::transfer
-use { circularize_at_pe } from glib::maneuver_vacuum
+use { circularize_at_pe, change_incl } from glib::maneuver_vacuum
+use { Universe } from glib::utility
 
 pub fn main_flight(vessel: Vessel, target_apoapsis: int = 80000) -> Unit = {
 
     // Standard Setup
     let mission = Mission("To the Mun!",vessel)
     let con = mission.start()
+    let MUN = Universe().MUN
 
     // Check if we are still in the process of getting to Orbit
     if (vessel.orbit.reference_body.name == "Kerbin" && vessel.orbit.periapsis < 75000)
        launch_atmosphere(mission, target_apoapsis, 0.01, 0.7, 90)
+
+    // Adjust inclination
+    let ni = change_incl(vessel, MUN.orbit)
+    mission.addManeuver(ni)
+    mission.burnNextNode()
 
     // We made it to Orbit, are we still around Kerbin
     if (vessel.orbit.reference_body.name == "Kerbin" && vessel.orbit.apoapsis.defined && vessel.orbit.apoapsis.value < 5000000) {
@@ -20,7 +27,6 @@ pub fn main_flight(vessel: Vessel, target_apoapsis: int = 80000) -> Unit = {
         t.planTransfer(mission,"Mun", 0.6)
         const n = t.getTransferNode()
         mission.addManeuver(n)
-        return
         mission.burnNextNode()
         con.log("  ejection burn complete.")
     }
