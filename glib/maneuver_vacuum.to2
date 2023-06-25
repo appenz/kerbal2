@@ -180,14 +180,6 @@ pub sync fn change_incl(vessel: Vessel, target_orbit: Orbit) -> Node = {
     return Node(t_node,dv)
 }
 
-// Adjust inclination with multiple burns until we have sufficient precision
-//pub sync fn change_incl(vessel: Vessel, target_orbit: Orbit) {
-
-//    while (true) {
-//        let incl = 
-//    }
-//}
-
 // Chage the Periapsis at the next Apoapsis
 
 pub sync fn change_pe_at_ap(vessel: Vessel, new_pe: float) -> Node = {

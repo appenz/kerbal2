@@ -89,7 +89,7 @@ impl Display {
             fuel = format("{0,5:P1}", x) 
         }
 
-        self.h3 = format("stage: {0}/{1}    fuel: {2}", (vessel.staging.current, vessel.staging.count, fuel))
+        //self.h3 = format("stage: {0}/{1}    fuel: {2}", (vessel.staging.current, vessel.staging.count, fuel))
 
         CONSOLE.print_at( 0,0, format("{0,-80}",self.h1))
  

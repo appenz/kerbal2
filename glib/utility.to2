@@ -17,8 +17,28 @@ pub struct Universe() {
     MINIMUS : Body = find_body("Minimus").value
 }
 
+pub struct Location(body_name : string, latitude : float, longitude : float ) {
+    body_name : string = body_name
+    latitude  : float = latitude
+    longitude : float = longitude
+}
+
+// Class that encapsulates all the locations we care about
+
 pub struct Locations() {
-    KerbalSpaceCenter : GeoCoordinates = find_body("Kerbin").value.geo_coordinates(0,-74.8296)
+    KerbalSpaceCenter : Location = Location("Kerbin",0,-74.8296)
+    LaunchPad1 :        Location = Location("Kerbin",-0.4265,-74.8297)
+    LaunchPad2 :        Location = Location("Kerbin",-0.2418,-74.9860)
+    LandingPad1 :       Location = Location("Kerbin",-0.5512,-74.9110)
+}
+
+impl Location {
+
+    fn geoCoordinates(self) -> GeoCoordinates = {
+        const body_maybe = find_body(self.body_name)
+        const body = body_maybe.value
+        return body.geo_coordinates(self.latitude,self.longitude)
+    }
 }
 
 sync pub fn rad2deg(r: float) -> float = {

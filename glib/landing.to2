@@ -1,0 +1,142 @@
+//
+// Maneuver functions
+//
+
+use { Vessel, AutopilotMode, VesselSituation, DeltaVSituation  } from ksp::vessel
+use { Body, Orbit, GeoCoordinates } from ksp::orbit
+use { vec2, vec3, Vec3 } from ksp::math
+use { CONSOLE, RED } from ksp::console
+use { sleep, current_time, wait_until, yield } from ksp::game
+use { warp_to } from ksp::game::warp
+use { DEBUG } from ksp::debug
+
+use { acos_deg, clamp, sqrt, PI, min, max, exp, log, abs } from core::math
+use { format } from core::str
+
+use { Mission } from glib::mission
+use { pretty_time, pretty_dt, pretty_distance, warning, panic } from glib::display
+use { deg360 } from glib::utility
+
+// Land a vessel at a given landing site. Ignores athmosphere.
+
+pub fn land_vessel(mission: Mission, landing_site: GeoCoordinates) -> Unit = {
+    // x marks the spot
+    let ground = DEBUG.add_ground_marker(landing_site, RED, 0)
+    const alt_tar = 200
+
+    const vessel = mission.vessel
+    const con = mission.console.value
+    const body = vessel.main_body
+    const frame = vessel.main_body.celestial_frame
+    const body_frame = vessel.main_body.body_frame
+
+    const g = body.grav_parameter / body.radius^2
+    const maxthrust = vessel.available_thrust
+
+    // Landing site is fixed in the body's rotating frame
+    const landing_site_pos = body.global_surface_position(landing_site.latitude, landing_site.longitude, landing_site_alt).to_local(body_frame)
+    const landing_site_alt = body.terrain_height(landing_site.latitude, landing_site.longitude)
+    let al = vessel.altitude_sealevel - landing_site_alt
+    let t0 = current_time()
+    
+    vessel.autopilot.mode = AutopilotMode.Navigation
+
+    while (al > alt_tar) {
+        let status = "Unknown status"
+        let mod = 0
+        let thr_mm = 1.0
+
+        const a_max = maxthrust / vessel.mass  
+        const up_vec = vessel.up
+
+        // recalculate altitude and distance to landing site
+        al = vessel.altitude_sealevel - landing_site_alt
+        const vessel_vec = vessel.global_position.to_local(body_frame)
+        const dx_vec = landing_site_pos-vessel_vec
+        const v_vec  = vessel.surface_velocity
+   
+        con.log(landing_site_pos.to_string()+ " / " +vessel_vec.to_string() + " alt:" + pretty_distance(al))
+        //let vvv1 = DEBUG.add_vector(fn() -> v_vessel, fn() -> d_kerbol*50, RED, "Kerbol", 1)
+        //let vvv2 = DEBUG.add_vector(fn() -> v_vessel, fn() -> d_vessel*50, GREEN, "Vessel", 1)
+
+        // Calculate time to impact (0 MSL)
+        const v = -v_vec.dot(up_vec)
+
+        const hv_vec = v_vec - v_vec.dot(up_vec)*up_vec
+        const vv_vec = v_vec - hv_vec
+
+        // Time to impact and time until we want to have stopped
+        const t_left = (-v+(v^2+2*(max(al,0))*g)^0.5)/g+0.00001
+        const t_left_stop = (-v+(v^2+2*(max(al-alt_tar,0))*g)^0.5)/g+0.00001
+
+        // Calculate target velocity that would make us hit the target 
+        let v_target_vec = dx_vec*(1/t_left)
+        
+        // Correct by the fact that we want to have v=0 at al=0
+        // Split into horizontal and vertical
+        const hv_target_vec = v_target_vec - v_target_vec.dot(up_vec)*up_vec
+        let vv_target_vec = v_target_vec - hv_target_vec
+
+        // Define velocity goal
+        const v_goal = t_left_stop*a_max
+        
+        // If vertical speed exceeds target, correct it to target
+        if (vv_target_vec.magnitude > v_goal) 
+          vv_target_vec = vv_target_vec.normalized*v_goal        
+        
+        v_target_vec = hv_target_vec + vv_target_vec
+                          
+        // Burn is the difference between velocities.
+        let delta_v = v_target_vec-v_vec
+                
+        if (delta_v.dot(up_vec) < 0 || v_goal > vv_target_vec.magnitude) {
+          // Make sure we never steer up and we don't brake befor necessary.
+          status = "horizontal mode"
+          delta_v = delta_v - delta_v.dot(up_vec)*up_vec
+          mod = 0
+        } else {
+          status = "vertical mode"
+          mod = 1
+        }
+      
+        // Dampen small corrections      
+        if ( delta_v.magnitude < 1 )
+          thr_mm = 0.1
+
+        if ( delta_v.angle_to(vessel.facing.vector) > 10 && mod == 0) {
+            // Too far off, don't burn yet.
+            thr_mm = 0
+            status = format("turn da {0:N1}", (delta_v.angle_to(vessel.facing.vector)) )
+        }
+
+        // For the last 30 seconds, smooth turn to retrograde
+        let steering_direction = delta_v.to_direction()
+        if ( t_left < 30 && delta_v.angle_to(-v_vec) > abs(t_left) ) {
+            status = "to retrograde"    
+            steering_direction =  (-v_vec.normalized*abs(30-t_left)/10+delta_v.normalized).to_direction()
+        } 
+
+        vessel.autopilot.target_orientation = steering_direction.vector
+
+        // Set throttle to time it takes to normalize delta_v        
+        const throttle = thr_mm*max(min(1.0,1*(delta_v.magnitude)/(a_max-g)),0)
+        vessel.set_throttle(throttle)
+
+        const ct = current_time()
+        if (ct-t0 > 0.5) { 
+          con.h3 = format("retro: {0,-15}  dst: {1,-10}  v: {2:N1} / {3:N1}  dv_v: {4:N1}  dv: {5:N1} ", 
+                      (status, pretty_distance(dx_vec.magnitude), v, v_goal, delta_v.dot(up_vec), delta_v.magnitude ) )
+
+          con.h4 = format("throttle: {0:P}  t: {1}  alt: {2} vs {3}",
+                      (throttle, pretty_dt(t_left), pretty_distance(al), pretty_distance(alt_tar) ) )
+
+          con.h5 = format("hv/vv: {0:N1} / {1:N1}   target hv/dvv: {2:N1} / {3:N1}",
+                      (hv_vec.magnitude, vv_vec.magnitude, hv_target_vec.magnitude, vv_target_vec.magnitude ) )
+          t0 = ct
+          con.update()
+        }
+        sleep(0.1)
+    }
+    vessel.set_throttle(0)
+    vessel.autopilot.mode = AutopilotMode.Prograde
+}
