@@ -39,6 +39,9 @@ pub struct Mission(mission_name : string, myvessel: Vessel) {
     stage_eng_c : int = 0
     stage_thrust : float = 0
     stage_delta_v : float = 0
+
+    // Debugging
+    debug : bool = true
 }
 
 pub sync fn Mission_None() -> Option<Mission> = {

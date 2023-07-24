@@ -1,4 +1,4 @@
-use { Vessel  } from ksp::vessel
+use { Vessel, VesselSituation  } from ksp::vessel
 use { Body, Orbit } from ksp::orbit
 use { vec2, vec3, Vec3 } from ksp::math
 use { CONSOLE } from ksp::console
@@ -13,21 +13,23 @@ pub fn main_flight(vessel: Vessel) -> Unit = {
     let mission = Mission("Atm Landing Test",vessel)
     let con = mission.start()
 
-    if ( vessel.altitude_sealevel < 2000 ) {
-        con.log("Launch.")
-        vessel.set_throttle(1)
-        mission.stage()
-    }
+    // Check if we are landed
+    if ( vessel.situation == VesselSituation.Landed ) {
+        if ( vessel.altitude_sealevel < 2000 ) {
+            con.log("Launch.")
+            vessel.set_throttle(1)
+            mission.stage()
+        }
 
-    // Run in a loop until altitude is 2000m
-    while( vessel.altitude_sealevel < 2000 ) {
-        con.update1()
+        // Run in a loop until altitude is 2000m
+        while( vessel.altitude_sealevel < 2000 ) {
+            con.update1()
+        }
     }
 
     vessel.set_throttle(0)
     con.log("Reached target altitude for test")
 
-    //con.log(mission.locations.LandingPad1.to_string())
     const landing_site = mission.locations.LandingPad1.geoCoordinates()
     con.log("landing.")
     land_vessel(mission, landing_site)
