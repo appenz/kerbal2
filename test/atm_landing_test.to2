@@ -14,7 +14,7 @@ pub fn main_flight(vessel: Vessel) -> Unit = {
     let con = mission.start()
 
     // Check if we are landed
-    if ( vessel.situation == VesselSituation.Landed ) {
+    if ( vessel.situation == VesselSituation.PreLaunch ) {
         if ( vessel.altitude_sealevel < 2000 ) {
             con.log("Launch.")
             vessel.set_throttle(1)

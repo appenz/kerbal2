@@ -2,10 +2,16 @@ use { Vessel } from ksp::vessel
 use { Mission } from glib::mission
 use { launch_atmosphere } from glib::maneuver_atmosphere
 use { Transfer } from glib::transfer
-use { circularize_at_pe, change_incl } from glib::maneuver_vacuum
-use { Universe } from glib::utility
+use { circularize_at_pe, change_pe_at_ap, change_ap_at_pe, change_incl } from glib::maneuver_vacuum
+use { Universe, lon_sunny_side } from glib::utility
+use { land_vessel } from glib::landing
+use { sleep, current_time } from ksp::game
+use { format } from core::str
 
 pub fn main_flight(vessel: Vessel, target_apoapsis: int = 80000) -> Unit = {
+
+    const orbit_alt = 50000.0
+    const deorbit_angle = 5.0
 
     // Standard Setup
     let mission = Mission("To the Mun!",vessel)
@@ -13,13 +19,14 @@ pub fn main_flight(vessel: Vessel, target_apoapsis: int = 80000) -> Unit = {
     let MUN = Universe().MUN
 
     // Check if we are still in the process of getting to Orbit
-    if (vessel.orbit.reference_body.name == "Kerbin" && vessel.orbit.periapsis < 75000)
+    if (vessel.orbit.reference_body.name == "Kerbin" && vessel.orbit.periapsis < 75000) {
        launch_atmosphere(mission, target_apoapsis, 0.01, 0.7, 90)
 
-    // Adjust inclination
-    let ni = change_incl(vessel, MUN.orbit)
-    mission.addManeuver(ni)
-    mission.burnNextNode()
+        // Adjust inclination
+        let ni = change_incl(vessel, MUN.orbit)
+        mission.addManeuver(ni)
+        mission.burnNextNode()
+    }
 
     // We made it to Orbit, are we still around Kerbin
     if (vessel.orbit.reference_body.name == "Kerbin" && vessel.orbit.apoapsis.defined && vessel.orbit.apoapsis.value < 5000000) {
@@ -36,10 +43,55 @@ pub fn main_flight(vessel: Vessel, target_apoapsis: int = 80000) -> Unit = {
         mission.warpToSOI("Mun")
     }
 
-    con.log("Lowering Apoapsis.")
-    let n3 = circularize_at_pe(vessel)
-    mission.addManeuver(n3)
-    mission.burnNextNode()
+    // We are in the SOI of the Mun. First, check if we have to circularize
+    if (!vessel.orbit.apoapsis.defined) {
+        con.log("Lowering Apoapsis.")
+        const n2 = circularize_at_pe(vessel)
+        mission.addManeuver(n2)
+        mission.burnNextNode()
+    }
+
+    // Lower orbit to 10k meters
+    if ( vessel.orbit.apoapsis.value > orbit_alt*1.1) {
+        con.log("Lowering Orbit to 10k.")
+        let n3 = change_pe_at_ap(vessel,orbit_alt)
+        mission.addManeuver(n3)
+        mission.burnNextNode()
+
+        let n4 = change_ap_at_pe(vessel,orbit_alt)
+        mission.addManeuver(n4)
+        mission.burnNextNode()
+    }
+
+    // Land.
+    const lat = 0.0
+    //const lon = lon_sunny_side(mission)
+    const lon = 210.0
+    const body = vessel.orbit.reference_body
+    const frame = vessel.main_body.celestial_frame
+    const landing_site = body.geo_coordinates ( lat,lon )
+    con.log(format("  landing at site: {0:N1}/{1:N1}  (ship long: {2:N1})",
+            (lat, lon, vessel.geo_coordinates.longitude)) )
+    //let ground = ksp::debug::DEBUG.add_ground_marker(landing_site, ksp::console::RED, 0)
+
+    if (vessel.orbit.periapsis > 1000) {
+        // Location picked, let's land there.
+        const rel_angle = (landing_site.longitude - vessel.geo_coordinates.longitude - deorbit_angle + 720) % 360
+
+        // Correct for rotation
+        let rot_corr = 1+vessel.orbit.period/body.rotation_period 
+        const dt = rel_angle/360*vessel.orbit.period*rot_corr
+        con.log(format("  rel angle to deorbit: {0:N} eta {1}",(rel_angle,dt)))
+
+        let n = change_pe_at_ap(vessel, 0)
+
+        // Burn this amount of dV, but right time and direction
+        n.time = current_time()+dt
+        n.delta_v = -vessel.orbit.global_velocity(n.time).to_local(frame).normalized*n.delta_v.magnitude
+        mission.addManeuver(n)
+        mission.burnNextNode()
+    }
+    land_vessel(mission, landing_site)
 
     mission.end()
 }

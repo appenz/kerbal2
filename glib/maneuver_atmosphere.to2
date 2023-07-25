@@ -16,7 +16,7 @@ use { format } from core::str
 use { warning, panic, pretty_time, pretty_trend } from glib::display
 use { Node, ErrorNode, circularize_at_ap, circularize_at_pe, change_pe_at_ap, change_ap_at_pe } from glib::maneuver_vacuum
 use { Mission } from glib::mission
-use { Universe, Locations, lat_sunny_side, lat_nice_spot } from glib::utility
+use { Universe, Locations, lon_sunny_side, lat_nice_spot } from glib::utility
 
 // Burn a maneuver node that is part of an atmospheric ascent
 // This means:
@@ -266,13 +266,13 @@ pub fn land_atmosphere(mission: Mission, landing_site_maybe : Option<GeoCoordina
             landing_site = landing_site_maybe.value
         } else {
             // Find the latitude with the sun overhead
-            const lat_sun = lat_sunny_side(mission)
+            const lon_sun = lon_sunny_side(mission)
             const long = lat_nice_spot(mission)
             const lat = 0
             landing_site = body.geo_coordinates ( lat,long )
             con.log(format("  landing site: {0:N1}/{1:N1}  (ship: {2:N1})",
                                 (lat, long, vessel.geo_coordinates.longitude)) )
-            let sunny_marker = DEBUG.add_ground_marker(body.geo_coordinates ( 0,lat_sun ), YELLOW, 0)
+            //let sunny_marker = DEBUG.add_ground_marker(body.geo_coordinates ( 0,lon_sun ), YELLOW, 0)
         }
         let ground = DEBUG.add_ground_marker(landing_site, RED, 0)
         let origin = DEBUG.add_ground_marker(body.geo_coordinates ( 0,0 ), BLUE, 0)

@@ -93,9 +93,9 @@ pub fn find_encounter(t1: Targetable, t2: Targetable, distance: float) -> float 
     return t
 }
 
-// Find the center latitude of the sunny side of the planet in Kerbol system
+// Find the center longitude of the sunny side of the planet in Kerbol system
 
-pub fn lat_sunny_side(mission : Mission) -> float = {
+pub fn lon_sunny_side(mission : Mission) -> float = {
     const vessel = mission.vessel
     const body = vessel.main_body
     const frame = vessel.main_body.celestial_frame
@@ -139,7 +139,7 @@ pub fn lat_nice_spot(mission : Mission) -> float = {
     const vessel = mission.vessel
     const con = mission.console.value
     const body = vessel.main_body
-    const sun_zenith = lat_sunny_side(mission)
+    const sun_zenith = lon_sunny_side(mission)
     let long = 0.0
 
     let delta_to_ksp = abs( angle_diff(mission.locations.KerbalSpaceCenter.longitude, sun_zenith) )

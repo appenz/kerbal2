@@ -21,7 +21,7 @@ use { deg360 } from glib::utility
 
 pub fn land_vessel(mission: Mission, landing_site: GeoCoordinates) -> Unit = {
 
-    const alt_tar = 200 // Altitude at which we try to stop
+    const alt_tar = 100 // Altitude at which we try to stop
     const precision = 10 // Precision of the landing spot
     const vessel = mission.vessel
     const con = mission.console.value
@@ -126,10 +126,10 @@ pub fn land_vessel(mission: Mission, landing_site: GeoCoordinates) -> Unit = {
         // Steer against delta_v.
         // For some reason the math only works with the global frame but fails if we do the math in the body frame
 
-        // For the last 30 seconds, keep the vessel upright
+        // For the last 20 seconds, keep the vessel upright
         let steering_v = delta_v.normalized
         if(t_left_stop < 20) {
-          const f = clamp(20.0/t_left_stop,0.1,0.9)
+          const f = clamp(20.0/t_left_stop,0.2,0.8)
           steering_v = ((1-f)*up_vec + f*delta_v.normalized).normalized
           status = "upright mode"
         }
@@ -170,6 +170,7 @@ pub fn land_vessel(mission: Mission, landing_site: GeoCoordinates) -> Unit = {
     // here on we use the vessel altitude.
 
     con.h5 = ""
+    vessel.actions.gear = true
 
     while (vessel.situation != VesselSituation.Landed && vessel.situation != VesselSituation.Splashed) {
         let status = "Hover ???"
@@ -190,14 +191,19 @@ pub fn land_vessel(mission: Mission, landing_site: GeoCoordinates) -> Unit = {
         const v_vec_v = v_vec.dot(up_vec)*up_vec
         const v_vec_h = v_vec -v_vec_v
 
+        // Time to impact
+        const t_left = al/v_vec_v.magnitude 
+        // Max descent speed is time to impact times max acceleration
+        const v_v_max = (a_max-g)*t_left
+
         // Hover towards goal at 1m/s
         const h_speed = min(sqrt(dx_vec_h.magnitude),dx_vec_h.magnitude/10)
         let v_vec_h_goal = dx_vec_h.normalized*h_speed
 
-        // If alt < distance to site, descend. Otherwise, hover.
+        // If al < distance to site, descend. Otherwise, hover.
         let v_vec_v_goal = vec3(0,0,0)
-        const descent_speed = clamp(al*2,1,10)
-        if (al < min(al,precision)) {
+        const descent_speed = clamp(al/2,1,v_v_max/5)
+        if (al < max(al,precision) && v_vec_h.magnitude < 1) {
             status = "hover descend"
             v_vec_v_goal = -up_vec*descent_speed
             v_vec_h_goal = v_vec_h_goal*0.2
@@ -222,20 +228,23 @@ pub fn land_vessel(mission: Mission, landing_site: GeoCoordinates) -> Unit = {
 
         // Set throttle to hover plus delta_v, but only if we are not going up
         let throttle = 0.0
+
         if (v_vec.dot(up_vec) < 0) {
-          const throttle_adjust = (delta_v.dot(up_vec))/(a_max-g)
+          let throttle_damp = 1.0
+          const throttle_adjust = (delta_v.dot(up_vec))/(a_max-g)*throttle_damp
           const throttle_base = g/a_max
           throttle = clamp(throttle_base+throttle_adjust, 0, 1)
-        }      
+        }
+
         vessel.set_throttle(throttle)
 
         const ct = current_time()
         if (ct-t0 > 0.5) { 
-          con.h3 = format("status: {0} altitude: {1:N1} distance: {2:N.1} ", 
-                      (status, pretty_distance(al), pretty_distance(dx_vec_h.magnitude) ) )
+          con.h3 = format("status: {0} altitude: {1:N1}  horiztl dist: {2:N.1}  t at current speed: {3:N1} s", 
+                      (status, pretty_distance(al), pretty_distance(dx_vec_h.magnitude), t_left ) )
 
-          con.h4 = format("throttle: {0:P} v_vert: {1:N1} delta_v: {2:N1} delta_v_y: {3:N1}",
-                      (throttle, v_vec.dot(up_vec), delta_v.magnitude, delta_v.dot(up_vec) ) )
+          con.h4 = format("throttle: {0:P0} v_vert/target/max: {1:N1}/{4:N1}/{5:N1} delta_v: {2:N1} delta_v_y: {3:N1}",
+                      (throttle, v_vec.dot(up_vec), delta_v.magnitude, delta_v.dot(up_vec), descent_speed, v_v_max ) )
 
           t0 = ct
           con.update()
