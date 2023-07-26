@@ -18,6 +18,8 @@ pub fn main_flight(vessel: Vessel, target_apoapsis: int = 80000) -> Unit = {
     let con = mission.start()
     let MUN = Universe().MUN
 
+    glib::utility::check_and_finish_ssb(mission)
+
     // Check if we are still in the process of getting to Orbit
     if (vessel.orbit.reference_body.name == "Kerbin" && vessel.orbit.periapsis < 75000) {
        launch_atmosphere(mission, target_apoapsis, 0.01, 0.7, 90)
@@ -63,10 +65,10 @@ pub fn main_flight(vessel: Vessel, target_apoapsis: int = 80000) -> Unit = {
         mission.burnNextNode()
     }
 
-    // Land.
-    const lat = 0.0
+    // Land at the default site
+    const lat = 0.005160
+    const lon = -150.000834
     //const lon = lon_sunny_side(mission)
-    const lon = 210.0
     const body = vessel.orbit.reference_body
     const frame = vessel.main_body.celestial_frame
     const landing_site = body.geo_coordinates ( lat,lon )

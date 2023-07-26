@@ -16,7 +16,7 @@ use { format } from core::str
 use { warning, panic, pretty_time, pretty_trend } from glib::display
 use { Node, ErrorNode, circularize_at_ap, circularize_at_pe, change_pe_at_ap, change_ap_at_pe } from glib::maneuver_vacuum
 use { Mission } from glib::mission
-use { Universe, Locations, lon_sunny_side, lat_nice_spot } from glib::utility
+use { Universe, Locations, lon_sunny_side, lat_nice_spot, check_and_finish_ssb } from glib::utility
 
 // Burn a maneuver node that is part of an atmospheric ascent
 // This means:
@@ -173,6 +173,9 @@ pub fn launch_atmosphere(mission: Mission, target_apoapsis: float,
     vessel.set_throttle(0)
     vessel.autopilot.mode = AutopilotMode.Prograde
 
+    // If a solid state booster is still burning, wait for it to finish and stage
+    check_and_finish_ssb(mission)
+
     let t_apo = vessel.orbit.next_apoapsis_time().value
     con.log(format("Apoapsis {0:N} in {1:N} seconds.", (vessel.orbit.apoapsis.value, t_apo-current_time())))
 
@@ -312,3 +315,4 @@ pub fn land_atmosphere(mission: Mission, landing_site_maybe : Option<GeoCoordina
     while( !mission.landed() ) con.update1()
     con.log(format("Welcome to {0}, alt {1:N0}",(body.name,vessel.altitude_terrain)))
 }
+

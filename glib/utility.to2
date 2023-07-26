@@ -162,3 +162,33 @@ pub fn lat_nice_spot(mission : Mission) -> float = {
 
     return sun_zenith
 }
+
+// Find the type or the currently active engine
+
+pub fn active_engine_type(vessel: Vessel) -> ksp::vessel::EngineType = {
+    for(engine in vessel.engines)
+        if(engine.has_ignited) 
+            return engine.current_engine_mode.engine_type
+    return ksp::vessel::EngineType.Generic
+}
+
+// Simple function that checks if the current stage is a solid state booster
+// If yes, wait for it to finish burning and stage
+
+pub fn check_and_finish_ssb(mission: Mission) -> Unit = {
+
+    const vessel = mission.vessel
+    const con = mission.console.value
+
+    // Check if current engines are boosters
+    if (active_engine_type(vessel) != ksp::vessel::EngineType.SolidBooster) return
+
+    for(engine in vessel.engines)
+        if(engine.has_ignited) {
+            con.log("  waiting for solid state boosters to finish burning.")
+            wait_until(fn() -> engine.is_flameout == true)
+            con.log("  burn complete, staging.")
+            mission.stage()
+            return
+        }
+}
