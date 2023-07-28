@@ -13,7 +13,7 @@ use { acos_deg, clamp, sqrt, PI, min, max, exp, log } from core::math
 use { format } from core::str
 
 use { Mission } from glib::mission
-use { pretty_time, pretty_dt,  warning, panic } from glib::display
+use { pretty_distance, pretty_time, pretty_dt,  warning, panic } from glib::display
 use { deg360 } from glib::utility
 
 //
@@ -299,3 +299,62 @@ pub fn burnNextNodeVac(mission: Mission) -> Unit = {
     node.remove()
     sleep(0.5)
 }
+
+// Launch vessel to a specific orbit in vaccum
+
+pub fn launch_vacuum(mission: Mission, alt_orbit: float) -> Unit = {
+
+    const vessel = mission.vessel
+    const con = mission.console.value
+
+    con.log(format("Vacuum launch to alt {1}",
+                    (pretty_distance(alt_orbit))) )
+
+    vessel.autopilot.target_orientation = vessel.heading_direction(90, 90, 0).vector
+    vessel.autopilot.mode = AutopilotMode.Autopilot
+    vessel.set_throttle(1)
+
+    // Straight up to 20m
+    while(vessel.orbit.apoapsis.value < 50) {
+        if( mission.flameout() ) mission.stage()   
+        con.update1()
+    }
+
+    vessel.actions.gear = false
+
+    // Turn 45 degrees
+    vessel.autopilot.target_orientation = vessel.heading_direction(90, 10, 0).vector
+    while(vessel.orbit.apoapsis.value < alt_orbit*0.8) {
+        if( mission.flameout() ) mission.stage()       
+        con.update1()
+    }
+
+    vessel.set_throttle(0)
+    vessel.autopilot.mode = AutopilotMode.Prograde
+
+    // Critical: need to let the system catch up, otherwise maneuver node is broken
+    sleep(1)
+
+    // Series of maneuvers to get to target orbit
+    let n1 = change_pe_at_ap(vessel,alt_orbit)
+    mission.burnManeuver(n1)
+    con.log("1st burn complete.")
+
+    // Second, precision burn to raise periapsis
+    let n2 = circularize_at_ap(vessel)
+    mission.burnManeuver(n2)
+    con.log("2nd burn complete.")
+
+    if (vessel.orbit.periapsis < alt_orbit) {
+        con.log("Warning! Periapsis low, raising.")
+        let n3 = circularize_at_ap(vessel)
+        mission.burnManeuver(n3)
+    }
+
+    // Print orbit with apoapsis and periapsis
+    con.log(format("  Orbit achieved ap: {0}  pe: {1}",
+                    (pretty_distance(vessel.orbit.apoapsis.value), pretty_distance(vessel.orbit.periapsis))) )
+
+}
+
+// 1177 with 45 degrees

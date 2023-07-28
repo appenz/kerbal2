@@ -166,6 +166,12 @@ impl Mission {
         burnNextNodeVac(self)
     }
 
+    // Normal function to burn the next node 
+    fn burnManeuver(self, n: Node) -> Unit = {
+        self.addManeuver(n)
+        self.burnNextNode()
+    }
+
     // Warp to the SOI change. This is surprisingly hard.
     fn warpToSOI(self, dst: string) -> Unit = {
         const vessel = self.vessel

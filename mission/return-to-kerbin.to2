@@ -1,0 +1,58 @@
+use { Vessel, VesselSituation } from ksp::vessel
+use { Mission } from glib::mission
+use { launch_atmosphere } from glib::maneuver_atmosphere
+use { Transfer, Eject } from glib::transfer
+use { circularize_at_pe, change_pe_at_ap, change_ap_at_pe, change_incl, launch_vacuum } from glib::maneuver_vacuum
+use { Universe, lon_sunny_side } from glib::utility
+use { land_vessel } from glib::landing
+use { sleep, current_time } from ksp::game
+use { format } from core::str
+
+pub fn main_flight(vessel: Vessel) -> Unit = {
+
+    // Standard Setup
+    let mission = Mission("Return to Kerbin!",vessel)
+    let con = mission.start()
+
+    // Default values for return
+    let alt_orbit = 100000
+    let capture_alt = 45000
+    let eject_angle = 0
+
+    // Correct Value for certain celestial bodies
+    if (vessel.orbit.reference_body.name == "Mun") {
+        alt_orbit = 50000
+        capture_alt = 45000
+        eject_angle = 5
+    }
+
+    // Check if we are on the ground, if yes launch
+    if (vessel.situation == VesselSituation.Landed || vessel.situation == VesselSituation.PreLaunch) {
+        con.log("Vessel is on the ground. Launching.")
+        launch_vacuum(mission, alt_orbit)
+    }
+
+    // Eject from the current body into orbit of planet
+    if (vessel.orbit.reference_body.name != "Kerbin") {
+        const t = Eject()
+        t.planEject(mission,5)
+        const n = t.getTransferNode()
+        mission.addManeuver(n)
+        mission.burnNextNode()
+        con.log("  ejection burn complete.")
+    }
+
+    // Interplanetary Transfer if needed
+    // Not implemented yet
+
+    if (vessel.orbit.reference_body.name != "Kerbin") {
+        con.log("  ejection burn failed, not in Kerbin Orbit.")
+        mission.end()
+        return
+    }
+
+    // Aerocapture at Kerbin
+    // aero_capture(mission))
+
+    mission.end()
+}

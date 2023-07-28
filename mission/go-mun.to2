@@ -18,8 +18,6 @@ pub fn main_flight(vessel: Vessel, target_apoapsis: int = 80000) -> Unit = {
     let con = mission.start()
     let MUN = Universe().MUN
 
-    glib::utility::check_and_finish_ssb(mission)
-
     // Check if we are still in the process of getting to Orbit
     if (vessel.orbit.reference_body.name == "Kerbin" && vessel.orbit.periapsis < 75000) {
        launch_atmosphere(mission, target_apoapsis, 0.01, 0.7, 90)

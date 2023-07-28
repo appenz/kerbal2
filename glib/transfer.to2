@@ -171,9 +171,73 @@ impl Transfer {
             panic("Can't add transfer node as none is planned.")
             return ErrorNode()
         }
-
         return Node(self.t_eject, self.v_eject)
     }
 
 }
 
+pub struct Eject() { 
+    src : string = "source"
+    a_eject : float = 0
+    v_eject : Vec3 = vec3(0,0,0)
+    t_eject : float = 0
+}
+
+impl Eject {
+
+    // Calculate the time to a specific ejection angle relative to the body prograde
+    fn calcTimeToEjection(self, mission: Mission, ejection_angle: float) -> Unit = {
+        const vessel = mission.vessel
+        const orbit = vessel.orbit
+        const body = orbit.reference_body
+        const frame = body.celestial_frame
+        const con = mission.console.value
+
+        // Vector in the prograde direction of the body's orbit
+        const body_prograde = body.orbit.global_velocity(current_time()).vector.to_local(frame)
+        // Vector from center of body to the vessel
+        const body_to_vessle = (vessel.global_position-body.global_position).to_local(frame)
+        // Difference is the angle to the prograde
+        let angle =  body_prograde.angle_to(body_to_vessle)
+        
+        // Next, are we moving towards that point or away?
+        const vessel_v = orbit.global_velocity(current_time()).vector.to_local(frame)
+        const direction = vessel_v.dot(body_prograde)
+
+        if (direction < 0) {
+            angle = deg360(360-angle)
+        }
+
+        const angle_delta = deg360(angle-ejection_angle)
+
+        // Time is angle * orbital period / 360
+        self.a_eject = ejection_angle
+        self.t_eject = current_time()+angle_delta*orbit.period/360.0
+    }
+
+    // Plan ejection from a body into orbit of the parent body  
+    fn planEject(self, mission: Mission, eject_angle: float)-> Unit = { 
+        let con  = mission.console.value
+        let vessel = mission.vessel
+        let orbit = vessel.orbit
+        self.src = orbit.reference_body.name
+
+        con.log(format("Planning ejection burn from {0}",(self.src)))
+
+        // Determine target phase angle and escape velocity
+        self.calcTimeToEjection(mission,eject_angle)
+        // Escape velocity is sqrt(2)*orbital_velocity
+        self.v_eject = (sqrt(2)-1)*vessel.orbit.orbital_velocity(self.t_eject)
+
+        con.log(format("  eject time {0}  angle {1:N1}  dV: {2:N} m/s",
+                (pretty_dt(self.t_eject), self.a_eject, self.v_eject.magnitude))) 
+    }
+
+    fn getTransferNode(self)-> Node = { 
+        if (self.t_eject == 0) {
+            panic("Can't add transfer node as none is planned.")
+            return ErrorNode()
+        }
+        return Node(self.t_eject, self.v_eject)
+    }
+}

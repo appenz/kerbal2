@@ -54,18 +54,18 @@ sync pub fn deg360(d: float) -> float = {
     return (d+3600.0) % 360
 }
 
-pub fn angle_diff(a: float, b: float) -> float = {
+sync pub fn angle_diff(a: float, b: float) -> float = {
     return (a - b + 180 + 720) % 360 - 180
 }
 
 // Calculate the distance between two targetables at time t
-pub fn find_distance_t(t1: Targetable, t2: Targetable, t: float) -> float = {
+sync pub fn find_distance_t(t1: Targetable, t2: Targetable, t: float) -> float = {
     const p1 = t1.orbit.global_position(t)
     const p2 = t2.orbit.global_position(t)
     return p1.distance(p2)
 }
 
-pub fn find_distance(t1: Targetable, t2: Targetable) -> float = {
+sync pub fn find_distance(t1: Targetable, t2: Targetable) -> float = {
     return find_distance_t(t1,t2,current_time())
 }
 
