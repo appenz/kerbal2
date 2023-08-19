@@ -7,7 +7,7 @@ use { Body, Orbit } from ksp::orbit
 use { vec2, vec3, Vec3 } from ksp::math
 use { CONSOLE } from ksp::console
 use { sleep, current_time, wait_until, yield } from ksp::game
-use { warp_to } from ksp::game::warp
+use { warp_to, current_rate } from ksp::game::warp
 
 use { acos_deg, clamp, sqrt, PI, min, max, exp, log } from core::math
 use { format } from core::str
@@ -240,7 +240,12 @@ pub fn burnNextNodeVac(mission: Mission) -> Unit = {
     let t_end = node.time + node.burn_duration
 
     // Need code here to orient vessel first
-    warp_to(node.time - 10)
+    while( current_time() < node.time - 15 ) {
+        warp_to(node.time - 10)
+        sleep(1)
+        wait_until(fn() -> current_rate() < 1.5)
+    }
+    con.log("  done.")
     vessel.autopilot.enabled = true
     vessel.autopilot.mode = AutopilotMode.Maneuver
     wait_until(fn() -> node.ETA <= 0.2)
@@ -307,7 +312,7 @@ pub fn launch_vacuum(mission: Mission, alt_orbit: float) -> Unit = {
     const vessel = mission.vessel
     const con = mission.console.value
 
-    con.log(format("Vacuum launch to alt {1}",
+    con.log(format("Vacuum launch to alt {0}",
                     (pretty_distance(alt_orbit))) )
 
     vessel.autopilot.target_orientation = vessel.heading_direction(90, 90, 0).vector
@@ -356,5 +361,3 @@ pub fn launch_vacuum(mission: Mission, alt_orbit: float) -> Unit = {
                     (pretty_distance(vessel.orbit.apoapsis.value), pretty_distance(vessel.orbit.periapsis))) )
 
 }
-
-// 1177 with 45 degrees

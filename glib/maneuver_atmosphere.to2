@@ -13,7 +13,7 @@ use { DEBUG } from ksp::debug
 use { acos_deg, clamp, sqrt, PI, min, max, abs } from core::math
 use { format } from core::str
 
-use { warning, panic, pretty_time, pretty_trend } from glib::display
+use { warning, panic, pretty_time, pretty_trend, pretty_distance } from glib::display
 use { Node, ErrorNode, circularize_at_ap, circularize_at_pe, change_pe_at_ap, change_ap_at_pe } from glib::maneuver_vacuum
 use { Mission } from glib::mission
 use { Universe, Locations, lon_sunny_side, lat_nice_spot, check_and_finish_ssb } from glib::utility
@@ -306,13 +306,73 @@ pub fn land_atmosphere(mission: Mission, landing_site_maybe : Option<GeoCoordina
     // Detach the last rocket stage, next are parachutes
     mission.stage()
     vessel.autopilot.mode = AutopilotMode.Retrograde
+
+    warp_to(current_time()+3600)
     con.log("  waiting for altitude.")
     wait_until(fn() -> vessel.altitude_terrain < 5000)
     con.log("  waiting for parachute to be safe.")
     wait_until(fn() -> test_chute.chute_safety == ParachuteSafeStates.SAFE)
+    ksp::game::warp::cancel()
+    sleep(1)
     con.log("  parachute is safe. Deploying")
     mission.stage()   
     while( !mission.landed() ) con.update1()
     con.log(format("Welcome to {0}, alt {1:N0}",(body.name,vessel.altitude_terrain)))
 }
 
+// Aerocapture for the body we're orbiting
+// Return once our apoapsis is inside athmosphere or periapsis is zero
+
+pub fn aero_capture(mission: Mission) -> Unit = {
+
+    const vessel = mission.vessel
+    const con = mission.console.value
+    const body = vessel.main_body
+    const atm_depth = body.atmosphere_depth
+
+    let capture_alt = atm_depth*0.8
+
+    if (body.name == "Kerbin") {
+        capture_alt = 48000.0
+    }
+
+    con.log(format("Initiating aerocapture at {0}",(body.name)))
+
+    mission.burnManeuver(change_pe_at_ap(vessel, capture_alt))
+
+    let n = 1
+    while (vessel.orbit.apoapsis.value > atm_depth) {
+        con.log(format("  orbit {0} -> PE: {1} AP: {2}",(n,pretty_distance(vessel.orbit.periapsis),pretty_distance(vessel.orbit.apoapsis.value))))
+        n += 1
+
+        const t_pe = vessel.orbit.next_periapsis_time(current_time())
+        warp_to(t_pe)
+        while(vessel.altitude_sealevel > atm_depth) sleep(1) 
+        vessel.autopilot.mode = AutopilotMode.Retrograde
+
+        // Time to exit athmosphere should be roughly 2x time to PE
+        const dt_pe = vessel.orbit.next_periapsis_time(current_time())-current_time()
+        warp_to(current_time()+dt_pe*2)
+
+        // In the athmosphere. Wait for altitude to be outside of it.
+        while(vessel.altitude_sealevel < atm_depth) {
+            con.h4 = format("Waiting for Aerocapture.  PE: {0}  AP: {1} ({2:P0})", 
+                             (pretty_distance(vessel.orbit.periapsis), pretty_distance(vessel.orbit.apoapsis.value), vessel.orbit.apoapsis.value/atm_depth))
+            con.update1()
+
+            if (vessel.orbit.periapsis < 0) {
+                con.log("  periapsis is zero.")
+                ksp::game::warp::cancel()
+                return
+            }
+
+            if (vessel.orbit.apoapsis.value < atm_depth) {
+                con.log("  apoapsis is inside atmosphere.")
+                ksp::game::warp::cancel()
+                return
+            }
+        }
+
+    }
+
+}

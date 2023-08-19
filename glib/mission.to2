@@ -14,7 +14,7 @@ use { format } from core::str
 use { warning, panic, pretty_time, pretty_dt, pretty_distance, Display, Display_None } from glib::display
 use { Node, ErrorNode, burnNextNodeVac } from glib::maneuver_vacuum
 use { burnNextNodeAtm } from glib::maneuver_atmosphere
-use { Universe, Locations, find_encounter, find_distance_t, find_distance } from glib::utility
+use { Universe, Locations, find_encounter, find_soi_exit, find_distance_t, find_distance } from glib::utility
 
 pub struct Mission(mission_name : string, myvessel: Vessel) {
 
@@ -196,6 +196,35 @@ impl Mission {
         if(vessel.orbit.reference_body.name == dst) {
             d = find_distance(vessel, body_dst)
             con.log(format("  arrived {0:P1} of SOI {1:N0} m/{2:N0} m", (d/body_dst.SOI_radius, pretty_distance(d), pretty_distance(body_dst.SOI_radius))))
+        } else {
+            panic("warp failed, missed target.")
+        }
+    }
+
+    // Warp until we leave the SOI
+    fn warpToExitSOI(self) -> Unit = {
+        const vessel = self.vessel
+        const con = self.console.value
+        const body_src = vessel.orbit.reference_body
+
+        con.log("Warping to exit of SOI")
+
+        let t = find_soi_exit(vessel, body_src.SOI_radius*1.1)
+        let d = find_distance_t(vessel, body_src, t)
+
+        con.log(format("  SoI exit in {0} distance {1}", (pretty_distance(d),pretty_dt(t))))
+
+        warp_to(t)
+        con.h5 = ""
+
+        while(current_time()<t && vessel.orbit.reference_body.name == body_src.name) {
+            con.h4 = format("dst: {0} / POI {1}  ({2:P1})", (pretty_distance(d), pretty_distance(body_src.SOI_radius), d/body_src.SOI_radius))
+            con.update1()
+        }
+
+        if(vessel.orbit.reference_body.name != body_src.name) {
+            d = find_distance(vessel, body_src)
+            con.log(format("  exited at {0:P1} of SOI {1:N0} m/{2:N0} m", (d/body_src.SOI_radius, pretty_distance(d), pretty_distance(body_src.SOI_radius))))
         } else {
             panic("warp failed, missed target.")
         }

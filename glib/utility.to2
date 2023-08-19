@@ -7,7 +7,7 @@ use { CONSOLE } from ksp::console
 use { acos_deg, clamp, sqrt, PI, min, max, abs } from core::math
 use { format } from core::str
 
-use { warning, panic, pretty_distance, pretty_time, pretty_dt } from glib::display
+use { warning, panic, debug, pretty_distance, pretty_time, pretty_dt } from glib::display
 use { Mission } from glib::mission
 
 pub struct Universe() {
@@ -59,6 +59,7 @@ sync pub fn angle_diff(a: float, b: float) -> float = {
 }
 
 // Calculate the distance between two targetables at time t
+// Only seems to work if both targetables orbit the same body
 sync pub fn find_distance_t(t1: Targetable, t2: Targetable, t: float) -> float = {
     const p1 = t1.orbit.global_position(t)
     const p2 = t2.orbit.global_position(t)
@@ -78,16 +79,45 @@ pub fn find_encounter(t1: Targetable, t2: Targetable, distance: float) -> float 
     let t = current_time()
     let dx = 1.0
     let d_best = distance+1
+
     while( dx > 0 && d_best > distance) {
         i += 1
         const d_now = find_distance_t(t1,t2,t)
-        dx = d_now-find_distance_t(t1,t2,t+1)
+        const d_next = find_distance_t(t1,t2,t+1)
+        dx = d_now-d_next
         if(dx > 0) {
             t = t+d_now/dx*speed
         }
         d_best = find_distance_t(t1,t2,t)
         //const s = format("{0,4:N0} {1} in {2}",(i,pretty_distance(d_best), pretty_dt(t)))
         //warning(s)
+    }
+
+    return t
+}
+
+// Find the earliest time when a targetable is a certain distance from its body
+// - Uses gradient descent
+// - Returns time to furthest encounter if it can't reach distance
+pub fn find_soi_exit(t1: Targetable, distance: float) -> float = {
+    const speed = 0.01
+    let i = 0
+    let t = current_time()
+    let dx = 1.0
+    let d_best = distance-1
+
+    while( dx > 0 && d_best < distance) {
+        i += 1
+        const d_now = t1.orbit.radius(t)
+        const d_next = t1.orbit.radius(t+1)
+        warning(format("{0} -> {1}",(pretty_distance(d_now), pretty_distance(d_next))))
+        dx = d_next-d_now
+        if(dx > 0) {
+            t = t+d_now/dx*speed
+        }
+        d_best = t1.orbit.radius(t)
+        const s = format("{0,4:N0} {1} in {2}  dx: {3:N1}",(i,pretty_distance(d_best), pretty_dt(t), dx))
+        warning(s)
     }
 
     return t

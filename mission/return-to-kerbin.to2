@@ -1,6 +1,6 @@
 use { Vessel, VesselSituation } from ksp::vessel
 use { Mission } from glib::mission
-use { launch_atmosphere } from glib::maneuver_atmosphere
+use { launch_atmosphere, aero_capture, land_atmosphere } from glib::maneuver_atmosphere
 use { Transfer, Eject } from glib::transfer
 use { circularize_at_pe, change_pe_at_ap, change_ap_at_pe, change_incl, launch_vacuum } from glib::maneuver_vacuum
 use { Universe, lon_sunny_side } from glib::utility
@@ -32,8 +32,8 @@ pub fn main_flight(vessel: Vessel) -> Unit = {
         launch_vacuum(mission, alt_orbit)
     }
 
-    // Eject from the current body into orbit of planet
-    if (vessel.orbit.reference_body.name != "Kerbin") {
+    // If we are in a non-degenerate orbit, eject from the current body into orbit of planet
+    if (vessel.orbit.reference_body.name != "Kerbin" && vessel.orbit.apoapsis.defined) {
         const t = Eject()
         t.planEject(mission,5)
         const n = t.getTransferNode()
@@ -42,17 +42,14 @@ pub fn main_flight(vessel: Vessel) -> Unit = {
         con.log("  ejection burn complete.")
     }
 
-    // Interplanetary Transfer if needed
-    // Not implemented yet
-
+    // If we are in a degenrate orbit around another body, warp until out of SOI
     if (vessel.orbit.reference_body.name != "Kerbin") {
-        con.log("  ejection burn failed, not in Kerbin Orbit.")
-        mission.end()
-        return
+        mission.warpToExitSOI()
     }
 
     // Aerocapture at Kerbin
-    // aero_capture(mission))
+    aero_capture(mission)
+    land_atmosphere(mission, None())
 
     mission.end()
 }
