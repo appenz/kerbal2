@@ -62,6 +62,20 @@ impl Mission {
         return true 
     }
 
+    // Check if any engines have flamed out.
+    sync fn flameout_any(self) -> bool = {
+        for(engine in self.vessel.engines)
+            if(engine.has_ignited && engine.is_flameout) return true
+        return false
+    }
+
+    // Check if any engines are ignited.
+    sync fn ignited_any(self) -> bool = {
+        for(engine in self.vessel.engines)
+            if(engine.has_ignited) return true
+        return false
+    }
+
     // Check if we have landed or splashed down
     sync fn landed(self) -> bool = {
         if (self.vessel.situation != VesselSituation.Landed && self.vessel.situation != VesselSituation.Splashed) return false
@@ -97,9 +111,11 @@ impl Mission {
             } else {
                 eng_name = ""
             }
+            if (deltav <= 0.1)
+                continue
 
             let s =  format("    {0} dv: {1,5:N0} m/s  mass: {2,4:N1} t  T/W: {3,4:N1}    {4}", 
-                            (stage, deltav, mass, thrust/mass, eng_name))
+                            (stage, deltav, mass, thrust/mass/10.0, eng_name))
             con.log(s)
         }
     
@@ -275,5 +291,22 @@ impl Mission {
         sleep(self.stage_delay_post)
         self.new_stage(true)
     }
+
+    fn getTotalDV(self) -> float = {
+        let dv = 0.0
+
+        for(stage in 1..self.vessel.staging.current)
+        {
+            const maybe_stage_info = self.vessel.delta_v.stage(stage)
+            if(!maybe_stage_info.defined) continue
+
+            const stage_info = maybe_stage_info.value
+            const dv_stage = stage_info.get_deltav(DeltaVSituation.Vaccum)
+
+            dv += dv_stage
+        }
+
+        return dv
+    }    
 }
 

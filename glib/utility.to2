@@ -222,3 +222,16 @@ pub fn check_and_finish_ssb(mission: Mission) -> Unit = {
             return
         }
 }
+
+pub fn has_ssb(mission: Mission) -> bool = {
+
+    const vessel = mission.vessel
+
+    for(engine in vessel.engines)
+        if(engine.has_ignited && engine.current_engine_mode.engine_type == ksp::vessel::EngineType.SolidBooster) 
+        {
+            return true
+        }
+
+    return false
+}

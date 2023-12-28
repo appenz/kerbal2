@@ -16,7 +16,7 @@ use { format } from core::str
 use { warning, panic, pretty_time, pretty_trend, pretty_distance } from glib::display
 use { Node, ErrorNode, circularize_at_ap, circularize_at_pe, change_pe_at_ap, change_ap_at_pe } from glib::maneuver_vacuum
 use { Mission } from glib::mission
-use { Universe, Locations, lon_sunny_side, lat_nice_spot, check_and_finish_ssb } from glib::utility
+use { Universe, Locations, lon_sunny_side, lat_nice_spot, check_and_finish_ssb, has_ssb } from glib::utility
 
 // Burn a maneuver node that is part of an atmospheric ascent
 // This means:
@@ -117,6 +117,231 @@ pub fn burnNextNodeAtm(mission: Mission, ap_target: float) -> Unit = {
     sleep(1)
     vessel.autopilot.mode = AutopilotMode.Prograde
     node.remove()
+}
+
+// Launch the vessel from a planet with an atmosphere into orbit using a gravity turn
+pub fn gravity_turn(mission: Mission, target_apoapsis: float, 
+                          turn_start: float, turn_pitch: float, heading: float) -> Unit = {
+
+    const vessel = mission.vessel
+    const con = mission.console.value
+    const startDV = mission.getTotalDV()
+
+    // If we are landed or pre-launch, launch
+    if (vessel.situation == VesselSituation.Landed || vessel.situation == VesselSituation.PreLaunch) {4
+        con.log("Vessel is on the ground. Launch.")
+        vessel.set_throttle(1)
+        sleep(0.2)
+        vessel.autopilot.mode = AutopilotMode.StabilityAssist
+        vessel.staging.next()
+        sleep(0.3)
+
+        // find launch clamps and check if they are still latched
+        for (part in vessel.parts)
+        {
+            if (part.is_launch_clamp)
+            {
+                con.log("Found a launch clamp")
+                if (part.launch_clamp.defined)
+                {
+                    con.log("Releasing launch clamps!")
+                    let lac = part.launch_clamp.value
+                    if (!lac.is_released)
+                        lac.release()
+                }
+            }
+        }
+    }
+
+    // calculate gravity turn altitudes
+    const atm_depth = vessel.main_body.atmosphere_depth
+    con.log(format("Target Apoapsis {0:N0}km, heading {1:N0} deg.", (target_apoapsis/1000.0, heading)))
+    con.h3 = format("Gravity turn will start at {0:N1} m/s", turn_start)
+
+    let spd = 0.0
+    let alt = vessel.altitude_terrain
+    let t_apo = 0.0
+    // Phase one: burn until turn start speed in m/s
+    while(vessel.surface_velocity.magnitude < turn_start) {
+        sleep(0.1)
+        spd = vessel.vertical_surface_speed
+        con.h4 = format("  speed: {0,6:N1}m/s, alt: {0,6:N1}", (spd, vessel.altitude_terrain))
+        con.update()
+        if (core::math::abs(vessel.altitude_terrain-alt) < 0.1) // detect if clamps are holding craft down
+        {
+            //con.log("Releasing launch clamps!")
+            //vessel.staging.next()
+        }
+        t_apo = vessel.orbit.next_apoapsis_time().value - current_time()
+    }
+
+    //
+    // start pitching maneuver
+    //
+
+    con.h3 = format("Pitching over to {0:N1}°...",(turn_pitch))
+    con.update()
+    ksp::game::warp::cancel()
+    vessel.autopilot.mode = AutopilotMode.Autopilot
+
+    // pitch over
+    const target_pitch = turn_pitch
+    for (pitch in 0..(target_pitch*5).to_int-2) {
+        sleep(0.15)
+        vessel.autopilot.target_orientation = vessel.heading_direction(heading, 90.0-pitch/5, 0).vector
+    }
+    sleep(2)
+    vessel.autopilot.target_orientation = vessel.heading_direction(heading, 90-target_pitch, 0).vector
+    sleep(4)
+
+    spd = vessel.surface_velocity.magnitude 
+    t_apo = vessel.orbit.next_apoapsis_time().value - current_time()
+
+    //
+    // start gravity turn
+    //
+    con.h3 = "Gravity turn..."
+    ksp::game::warp::cancel()
+    vessel.autopilot.mode = AutopilotMode.Prograde
+
+    let th = 100.0
+    let targetApTime = 50.0
+    let accApt = 0.0
+    let lastApt = t_apo
+    let hasSsb = has_ssb(mission)
+
+    // Phase two: burn until trajectory reaches apoapsis
+    while(vessel.orbit.apoapsis.value < target_apoapsis) {
+        spd = vessel.surface_velocity.magnitude 
+        t_apo = vessel.orbit.next_apoapsis_time().value - current_time()
+
+        accApt = t_apo - lastApt
+        lastApt = t_apo
+
+        // TODO: should probably use a PID controller for this
+        let apTimeDiff = t_apo - targetApTime
+        let throttleDiff = abs(apTimeDiff/accApt)/1.7
+        if (abs(accApt) > 0.05)
+        {
+            if (throttleDiff > 5)
+                throttleDiff = 5.0
+        }
+        else
+        {
+            if (throttleDiff > 1)
+                throttleDiff = 1.0
+        }
+
+        // make sure we don't over- or undershoot!
+        if (t_apo >= targetApTime && accApt > 0)
+            th -= throttleDiff
+        if (t_apo <= targetApTime && accApt < 0)
+            th += throttleDiff
+
+        if (th >= 100) 
+            th = 100 
+        else
+            con.h3 = "Throttling down to keep apoapsis..."
+
+        if (th <= 30) 
+        {
+            th = 30
+            if (hasSsb)
+            {
+                targetApTime = lastApt
+            }
+        }
+
+        let dv = vessel.delta_v.stage(vessel.staging.current)
+        let burnTime = dv.value.burn_time
+
+        // cancel warp before staging
+        if (burnTime < 5.0 && !has_ssb(mission) && ksp::game::warp::current_rate() > 1)
+        {
+            ksp::game::warp::cancel()
+        }
+        // increase throttle before staging
+        if (burnTime < 3.0 && !has_ssb(mission))
+        {
+            th *= 2
+        }
+
+        // set throttle according to calculations
+        vessel.set_throttle(th/100.0)
+
+        // Check if we need to stage. 
+        // Sometimes stage command is not executed, 
+        // also check if there is any ignited engine and repeat if not
+        if( mission.flameout_any() || !mission.ignited_any()) {
+
+            if (mission.flameout()) // all flamed out?
+                th = 50
+
+            vessel.set_throttle(5)
+            con.log("Flameout, advancing to new stage.")
+            mission.stage() 
+            vessel.set_throttle(th/100.0)
+        }
+
+        con.h4 = format("  apoapsis in:         {0,6:N1}s", (t_apo))
+        con.h5 = format("  stage burn remaining:{0,6:N1}s", (burnTime))
+
+        con.update_slow()
+        sleep(0.1/ksp::game::warp::current_rate())
+    }
+
+    ksp::game::warp::cancel()
+    vessel.set_throttle(0)
+    vessel.autopilot.mode = AutopilotMode.Prograde
+    sleep(0.1)
+
+    // If a solid state booster is still burning, wait for it to finish and stage
+    check_and_finish_ssb(mission)
+
+    t_apo = vessel.orbit.next_apoapsis_time().value
+    con.h5 = format("Apoapsis {0:N0}km in {1:N0} seconds.", (vessel.orbit.apoapsis.value/1000, t_apo))
+
+    //
+    // start gravity turn
+    //
+    con.h3 = "Coasting..."
+    con.update()
+    sleep(1)
+    while(vessel.altitude_sealevel < vessel.main_body.atmosphere_depth) {
+        // boost if needed
+        if (vessel.orbit.apoapsis.value < target_apoapsis)
+        {
+            for(i in 1..7 )
+            {
+                vessel.set_throttle(i/100.0)
+                sleep(0.04)
+            }
+            for(i in 5..1 )
+            {
+                vessel.set_throttle(i/100.0)
+                sleep(0.04)
+            }
+            vessel.set_throttle(0)
+        }
+        con.update()
+        sleep(0.5)
+    }
+    sleep(0.5)
+    ksp::game::warp::cancel()
+    sleep(0.5)
+
+    // Circularize at apoapsis
+    let n1 = circularize_at_ap(vessel)
+    mission.addManeuver(n1)
+    // align with maneuver
+    vessel.autopilot.mode = AutopilotMode.Maneuver
+    sleep(8)
+    // execute
+    mission.burnNextNode()
+
+    const endDV = mission.getTotalDV()
+    con.log("circularization burn complete.")
+    con.log(format("Gravity turn launch complete. DV used {0:N0}m/s", (startDV - endDV)))
 }
 
 // Launch the vessel from a planet with an atmosphere into orbit

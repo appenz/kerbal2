@@ -56,13 +56,13 @@ impl Transfer {
 
     // Calculate correct phase angle for a Hohmann Transfer
     sync fn hohmannPhaseAngle(self, alt_start: float, alt_end: float, o: Orbit) -> float = {
-        return 180*(1-(1/(2*sqrt(2))*sqrt((1+(alt_start+o.reference_body.radius)/(alt_end+o.reference_body.radius))^3)))
+        return 180*(1-(1/(2*sqrt(2))*sqrt((1+(alt_start+o.reference_body.radius)/(alt_end+o.reference_body.radius))**3)))
     }
 
     // Time needed for Hohmann transfer from alt1->alt2
 
     sync fn hohmannTime(self, orbit: Orbit, new_ap: float, time: float) -> float = {
-        return PI*( (orbit.radius(time)+new_ap+2*orbit.reference_body.radius)^3/(8*orbit.reference_body.grav_parameter) )^0.5
+        return PI*( (orbit.radius(time)+new_ap+2*orbit.reference_body.radius)**3/(8*orbit.reference_body.grav_parameter) )**0.5
     }
 
     // Current True Anomaly in deg. Will work even with circular/eccentric orbits

@@ -1,0 +1,74 @@
+use { Vessel } from ksp::vessel
+use { Mission } from glib::mission
+use { gravity_turn } from glib::maneuver_atmosphere
+use { CONSOLE } from ksp::console
+use { format } from core::str
+
+use { open_centered_window, Align } from ksp::ui
+use { wait_until } from ksp::game
+
+const startCell : Cell<int> = Cell(80)
+const pitchCell : Cell<float> = Cell(10)
+const headingCell : Cell<float> = Cell(90)
+const apCell : Cell<int> = Cell(85)
+const doLaunch : Cell<bool> = Cell(false)
+
+// estimates parameters of current vessel
+fn suggestParameters(vessel: Vessel) -> Unit =
+{
+    let sdv = vessel.delta_v.stage(vessel.staging.current)
+    let twr = sdv.value.get_TWR(ksp::vessel::DeltaVSituation.Altitude )
+    CONSOLE.print_line(format("twr: {0:N1}",(twr)))
+    startCell.value = (75 + (1.5-twr) * 10).to_int
+    pitchCell.value = 11 - (1.5-twr) * 10
+    if (pitchCell.value < 7)
+        pitchCell.value = 7
+}
+
+//
+// UI to input parameters
+//
+fn getParameters(vessel: Vessel) -> Unit = {
+
+    const window = open_centered_window("Gravity Turn V0.1", 400, 400)
+
+    let startLabel = window.add_label("Start vel [m/s]:", Align.Start)
+    const startInput = window.add_int_input(Align.Start).bind(startCell)
+    window.add_label("Initial pitch [°]:")
+    const pitchInput = window.add_float_input(Align.Start).bind(pitchCell)
+    window.add_label("Heading [°]:")
+    const headingInput = window.add_float_input(Align.Start).bind(headingCell)
+    window.add_label("Apoapsis [km]:")
+    const apInput = window.add_int_input(Align.Start).bind(apCell)
+
+    window.add_button("Launch").on_click(fn () -> {
+        doLaunch.value = true
+        window.close()
+    })
+
+    const done: Cell<bool> = Cell(false)
+
+    window.add_button("Cancel").on_click(fn () -> 
+    {
+        doLaunch.value = false
+        window.close()
+    })
+
+    wait_until(fn() -> window.is_closed)
+}
+
+pub fn main_flight(vessel: Vessel, target_apoapsis: int = 80000) -> Unit = {
+    CONSOLE.clear()
+    suggestParameters(vessel)
+    getParameters(vessel)
+
+    if (doLaunch.value)
+    {
+        // Standard Setup
+        let mission = Mission("Launch to Kerbin Orbit with gravity turn",vessel)
+        let con = mission.start()
+        gravity_turn(mission, apCell.value*1000.0, startCell.value, pitchCell.value, headingCell.value)
+
+        mission.end()
+    }
+}
