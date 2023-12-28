@@ -54,7 +54,7 @@ impl Node {
 
         // Plan: We need to step through every remaining stage, and calculate burn time for the stage
         let stage = vessel.staging.count
-        let dv_remaining = self.delta_v.magnitude
+        let dv_remaining = 0.0 //mission.getTotalDV()
         self.burn_time = 0.0
         self.burn_stages = 0
         self.burn_info = "stages: "
@@ -137,7 +137,7 @@ pub sync fn ErrorNode() -> Node = {
 pub sync fn t_hohmann(orbit : Orbit, alt1: float, alt2: float) -> float = {
     let body_radius = 1.0 // XXX
     let body_mu = orbit.reference_body.grav_parameter
-    return PI * sqrt( (alt1+alt2+2*body_radius)^3/(8*body_mu) )
+    return PI * sqrt( (alt1+alt2+2*body_radius)**3/(8*body_mu) )
 }
 
 // Velocity at a specific altitude for current orbit.
