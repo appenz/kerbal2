@@ -20,7 +20,7 @@ fn suggestParameters(vessel: Vessel) -> Unit =
     let twr = sdv.value.get_TWR(ksp::vessel::DeltaVSituation.Altitude )
     CONSOLE.print_line(format("twr: {0:N1}",(twr)))
     startCell.value = (75 + (1.5-twr) * 10).to_int
-    pitchCell.value = 11 - (1.5-twr) * 10
+    pitchCell.value = ((11 + (1.5-twr) * 10)*10).to_int / 10.0 // round to 1/10th
     if (pitchCell.value < 7)
         pitchCell.value = 7
 }

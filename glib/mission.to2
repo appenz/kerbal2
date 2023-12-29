@@ -115,7 +115,7 @@ impl Mission {
                 continue
 
             let s =  format("    {0} dv: {1,5:N0} m/s  mass: {2,4:N1} t  T/W: {3,4:N1}    {4}", 
-                            (stage, deltav, mass, thrust/mass/10.0, eng_name))
+                            (vessel.staging.count-stage, deltav, mass, thrust/mass/10.0, eng_name))
             con.log(s)
         }
     

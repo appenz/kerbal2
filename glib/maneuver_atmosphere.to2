@@ -2,7 +2,7 @@
 // Atmospheric Maneuvers
 //
 
-use { Vessel, VesselSituation, AutopilotMode, DeltaVSituation, ParachuteSafeStates } from ksp::vessel
+use { Vessel, VesselSituation, AutopilotMode, DeltaVSituation, ParachuteSafeStates, FlightCtrlState } from ksp::vessel
 use { GeoCoordinates, find_body } from ksp::orbit
 use { sleep, current_time, wait_until, yield } from ksp::game
 use { warp_to } from ksp::game::warp
@@ -119,7 +119,9 @@ pub fn burnNextNodeAtm(mission: Mission, ap_target: float) -> Unit = {
     node.remove()
 }
 
+//
 // Launch the vessel from a planet with an atmosphere into orbit using a gravity turn
+//
 pub fn gravity_turn(mission: Mission, target_apoapsis: float, 
                           turn_start: float, turn_pitch: float, heading: float) -> Unit = {
 
@@ -162,23 +164,18 @@ pub fn gravity_turn(mission: Mission, target_apoapsis: float,
     let alt = vessel.altitude_terrain
     let t_apo = 0.0
     // Phase one: burn until turn start speed in m/s
-    while(vessel.surface_velocity.magnitude < turn_start) {
-        sleep(0.1)
+    while(vessel.surface_velocity.magnitude < turn_start-5) {
         spd = vessel.vertical_surface_speed
         con.h4 = format("  speed: {0,6:N1}m/s, alt: {0,6:N1}", (spd, vessel.altitude_terrain))
         con.update()
-        if (core::math::abs(vessel.altitude_terrain-alt) < 0.1) // detect if clamps are holding craft down
-        {
-            //con.log("Releasing launch clamps!")
-            //vessel.staging.next()
-        }
         t_apo = vessel.orbit.next_apoapsis_time().value - current_time()
+        sleep(0.1)
     }
+    vessel.override_input_roll(0)
 
     //
     // start pitching maneuver
     //
-
     con.h3 = format("Pitching over to {0:N1}°...",(turn_pitch))
     con.update()
     ksp::game::warp::cancel()
@@ -186,8 +183,9 @@ pub fn gravity_turn(mission: Mission, target_apoapsis: float,
 
     // pitch over
     const target_pitch = turn_pitch
-    for (pitch in 0..(target_pitch*5).to_int-2) {
+    for (pitch in 0..(target_pitch*5).to_int-1) {
         sleep(0.15)
+        con.update()
         vessel.autopilot.target_orientation = vessel.heading_direction(heading, 90.0-pitch/5, 0).vector
     }
     sleep(2)
@@ -277,7 +275,7 @@ pub fn gravity_turn(mission: Mission, target_apoapsis: float,
             if (mission.flameout()) // all flamed out?
                 th = 50
 
-            vessel.set_throttle(5)
+            vessel.set_throttle(.05)
             con.log("Flameout, advancing to new stage.")
             mission.stage() 
             vessel.set_throttle(th/100.0)
@@ -307,6 +305,9 @@ pub fn gravity_turn(mission: Mission, target_apoapsis: float,
     con.h3 = "Coasting..."
     con.update()
     sleep(1)
+    // use time warp out of atmosphere during coasting
+    warp_to(t_apo)
+
     while(vessel.altitude_sealevel < vessel.main_body.atmosphere_depth) {
         // boost if needed
         if (vessel.orbit.apoapsis.value < target_apoapsis)
@@ -335,7 +336,8 @@ pub fn gravity_turn(mission: Mission, target_apoapsis: float,
     mission.addManeuver(n1)
     // align with maneuver
     vessel.autopilot.mode = AutopilotMode.Maneuver
-    sleep(8)
+    sleep(1) // give it some time
+
     // execute
     mission.burnNextNode()
 
