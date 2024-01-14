@@ -31,7 +31,7 @@ pub fn main_flight(vessel: Vessel, target_apoapsis: int = 80000) -> Unit = {
     // We made it to Orbit, are we still around Kerbin
     if (vessel.orbit.reference_body.name == "Kerbin" && vessel.orbit.apoapsis.defined && vessel.orbit.apoapsis.value < 5000000) {
         const t = Transfer()
-        t.planTransfer(mission,"Mun", 0.6)
+        t.planTransfer(mission,"Mun", MUN.SOI_radius*0.1)
         const n = t.getTransferNode()
         mission.addManeuver(n)
         mission.burnNextNode()
@@ -51,7 +51,7 @@ pub fn main_flight(vessel: Vessel, target_apoapsis: int = 80000) -> Unit = {
         mission.burnNextNode()
     }
 
-    // Lower orbit to 10k meters
+    // Lower orbit to 50k meters
     if ( vessel.orbit.apoapsis.value > orbit_alt*1.1) {
         con.log("Lowering Orbit to 10k.")
         let n3 = change_pe_at_ap(vessel,orbit_alt)

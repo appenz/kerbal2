@@ -104,10 +104,14 @@ impl Transfer {
 
     //
     // Plan a simple transfer within a star system to a body in a higher orbit
+    // Parameter: target_alt is the target altitude for the transfer above the target body.
+    //            As the transfer burn isn't super precise, don't go too low or you might crash.
+    //            But also don't go too high or you may miss the rendevouz alltogether.
+    //            10% of the Sphere of Influence (SOI) is a good starting point.
     // - Planned transfer will be recorded in phase angle and ejection angle, velocity & time
     // - Function will not check if this actually results in an encounter
 
-    fn planTransfer(self, mission: Mission, dst:string, soi_adjust: float)-> Unit = { 
+    fn planTransfer(self, mission: Mission, dst:string, target_alt: float)-> Unit = { 
         let con  = mission.console.value
         let vessel = mission.vessel
         let orbit = vessel.orbit
@@ -120,7 +124,7 @@ impl Transfer {
             return
         }        
         const body_dst = find_body(self.dst).value
-        con.log(format("Planning Transfer: {0} -> {1}",(self.src, self.dst)))
+        con.log(format("Planning Transfer: {0} -> {1}",(self.src, target_alt)))
 
         // Check if we transfer planet->moon or star->planet (vs. planet to planet)
 
@@ -139,8 +143,10 @@ impl Transfer {
             const da = 360/orbit.period - 360/body_dst.orbit.period
             self.t_eject = current_time()+a_delta/da
             con.log(format("  Angles. rate of change: {0:N5} delta {1:N1} -> time {2:N0}",(da, a_delta, pretty_dt(self.t_eject))))
-            // Estimate altitude we need to burn to. Assume it takes about half an orbit
-            self.alt_new = body_dst.orbit.radius(self.t_eject+body_dst.orbit.period/2)-orbit.reference_body.radius-body_dst.SOI_radius*soi_adjust
+            // Estimate altitude we need to burn to. 
+            // Basic formula is: radiums of orbit of target - radius of current body - radius of target body - target altitude
+            // TODO: Need to adjust this for non-circular orbits by estimating rendevous time better. For now we just take 1/4 rotation.
+            self.alt_new = body_dst.orbit.radius(self.t_eject+body_dst.orbit.period/4)-orbit.reference_body.radius-body_dst.radius-target_alt
             // Calculate dV needed to the new altitude
             self.v_eject = self.transferDeltaV(orbit, self.alt_new, self.t_eject)
 
