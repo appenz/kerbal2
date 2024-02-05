@@ -55,6 +55,13 @@ impl Mission {
         self.name
     }
 
+    // Helper function to return Apoapsis of the vessel in a safe way
+    // Returns -1 if undefined.
+    sync fn apoapsis(self) -> float = {
+        if (self.vessel.orbit.apoapsis.defined) return self.vessel.orbit.apoapsis.value 
+        return 0
+    }
+
     // Check if all engines have flamed out.
     sync fn flameout(self) -> bool = {
         for(engine in self.vessel.engines)
@@ -172,6 +179,37 @@ impl Mission {
         self.burnNextNode()
     }
 
+    // Warp to a specific time. Don't return until we are there.
+    fn warpToTime(self, t: float) -> Unit = {
+        const con = self.console.value
+        warp_to(t)
+        while(current_time()<t) {
+            con.h5 = format("Warp Time left: {0}", pretty_dt(t))
+            con.update1()
+            if (ksp::game::warp::current_index() == 0) {
+                warp_to(t)
+                sleep(0.1)
+            }
+        }
+        con.h5 = ""
+    }
+
+    // Warp to a specific altitude. Surprisingly easy.
+    fn warpToAltitude(self, alt_target: int) -> Unit = {
+        const orbit = self.vessel.orbit
+        const con = self.console.value
+
+        con.log(format("Warping to altitude {0}", pretty_distance(alt_target)))
+        const now = current_time()
+        const eta = orbit.next_time_of_radius(now, alt_target+orbit.reference_body.radius)
+        if (eta.defined) {
+            self.warpToTime(eta.value)
+            con.log(format("  arrived at altitude {0} m", pretty_distance(self.vessel.altitude_sealevel)))
+        } else {
+            panic("Orbit won't reach altitude.")
+        }
+    }
+
     // Warp to the SOI change. This is surprisingly hard.
     fn warpToSOI(self, dst: string) -> Unit = {
         const vessel = self.vessel
@@ -183,9 +221,9 @@ impl Mission {
         let t = find_encounter(vessel, body_dst, body_dst.SOI_radius*0.9)
         let d = find_distance_t(vessel, body_dst, t)
 
-        con.log(format("  encounter in {0} distance {1}", (pretty_distance(d),pretty_dt(t))))
+        con.log(format("  encounter in {1} distance {0}", (pretty_distance(d),pretty_dt(t))))
 
-        warp_to(t)
+        self.warpToTime(t)
         con.h5 = ""
 
         while(current_time()<t && vessel.orbit.reference_body.name != dst) {
@@ -214,7 +252,7 @@ impl Mission {
 
         con.log(format("  SoI exit in {0} distance {1}", (pretty_distance(d),pretty_dt(t))))
 
-        warp_to(t)
+        self.warpToTime(t)
         con.h5 = ""
 
         while(current_time()<t && vessel.orbit.reference_body.name == body_src.name) {

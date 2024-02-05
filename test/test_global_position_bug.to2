@@ -4,21 +4,21 @@ use { sleep, current_time } from ksp::game
 use { format } from core::str
 use { find_body } from ksp::orbit
 
-// Print is much useful info about our current state as possible
+// Script to verify a bug in the calculation of global positions in KS2
 
-pub fn main_flight(vessel: Vessel) -> Unit = {
+fn main_flight(vessel: Vessel) -> Unit = {
 
-    const t1 = find_body("Kerbin").value
-    const t2 = find_body("Mun").value
+    const t1 = find_body("Minmus").value
+    const t2 = vessel
+    const c_time = current_time()
 
     // Calculate distance to a target for the next few days
     for(i in 0..20) {
-            const t = current_time()+i*24*3600
+            const t = c_time+i*6*3600
             const p1 = t1.orbit.global_position(t)
             const p2 = t2.orbit.global_position(t)
             const d = p1.distance(p2)
-            //const d = (p1-p2).magnitude
-            CONSOLE.print_line(format("  day {1}: {0:N0} km", (d/1000.0, i)))
+            CONSOLE.print_line(format("day {1}: {0:N0} km", (d/1000.0, i)))
     }
 
 }

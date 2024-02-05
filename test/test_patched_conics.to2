@@ -1,0 +1,32 @@
+use { Vessel, AutopilotMode } from ksp::vessel
+use { CONSOLE } from ksp::console
+use { sleep, current_time } from ksp::game
+use { format } from core::str
+use { find_body } from ksp::orbit
+
+// Script to test new patched conic functionality
+
+fn main_flight(vessel: Vessel) -> Unit = {
+
+    // Check if we have a maneuver planned
+
+    CONSOLE.print_line(format("Maneuver Nodes: {0}", (vessel.maneuver.nodes.length)))
+    CONSOLE.print_line(format("Trajectories: {0}", (vessel.maneuver.trajectory.length)))
+
+    if (vessel.maneuver.trajectory.length == 0) {
+        CONSOLE.print_line("No maneuver nodes found. Exiting.")
+        return
+    }
+
+    // Get trajectory after first maneuver node
+    let orbit = vessel.maneuver.trajectory[0]
+
+    // Continously print the first trajectory's apoapsis
+    while (true) {
+        //CONSOLE.print_line(format("AP static orbit: {0}", (orbit)))
+        CONSOLE.print_line(format("AP static orbit: {0}", (orbit.apoapsis.value)))
+        CONSOLE.print_line(format("AP dynamic orbit: {0}", ( vessel.maneuver.trajectory[0].apoapsis.value)))
+        sleep(1)
+    }
+
+}

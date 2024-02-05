@@ -27,23 +27,33 @@ pub sync fn warning( s : string) -> Unit = {
 }
 
 pub sync fn debug( s : string) -> Unit = {
-    //CONSOLE.print_line("      Debug: "+s)
+    CONSOLE.print_line("      > "+s)
 }
 
 
 // Pretty distance print
-pub sync fn pretty_distance(d : float) -> string = {
+pub sync fn pretty_distance(dd : float) -> string = {
+    let sign = ""
+    let d = dd
+    if (dd < 0) {
+        sign = "-"
+        d = -dd
+    }
     if (d>1000000) 
-        return(format("{0:N0} km", d/1000 ) )
+        return(format("{1}{0:N0} km", (d/1000, sign) ) )
     if (d>1000) 
-        return(format("{0:N2} km", d/1000 ) )
-    return(format("{0:N1} m", d ) )
+        return(format("{1}{0:N2} km", (d/1000, sign) ) )
+    return(format("{1}{0:N1} m", (d, sign) ) )
 }
 
 
 // Pretty print time
 pub sync fn pretty_time(time : float) -> string = {
     let s = time.to_int
+    if (s>21600) 
+        return(format("{0:N0}d {1:N0}:{2,2:00}:{3,2:00}", (s/21600, (s/3600)%6, (s/60)%60, s%60) ))
+    if (s>3600) 
+        return(format("{0:N0}:{1,2:00}:{2,2:00}", (s/3600, (s/60)%60, s%60) ))
     if (s>200) 
         return(format("{0:N0}:{1,2:00}", (s/60, s%60) ) )
     return time.to_int.to_string()+" s"

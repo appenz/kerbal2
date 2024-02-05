@@ -12,8 +12,8 @@ use { warp_to } from ksp::game::warp
 use { acos_deg, clamp, sqrt, PI, min, max, acos } from core::math
 use { format } from core::str
 
-use { pretty_time, pretty_dt, warning, panic, debug } from glib::display
-use { rad2deg, deg2rad, deg360 } from glib::utility
+use { pretty_time, pretty_dt, pretty_distance, warning, panic, debug } from glib::display
+use { rad2deg, deg2rad, deg360, find_encounter, find_distance_t, find_encounter_o, find_distance_o } from glib::utility
 use { vv_alt, vv_axis, Node, ErrorNode } from glib::maneuver_vacuum
 use { Mission } from glib::mission
 
@@ -30,7 +30,7 @@ pub struct TransferInfo(psrc: string, pdst: string, palt: int, pa_phase: float, 
     v_eject: float = pv_eject
 }
 
-pub struct Transfer() { 
+pub struct Transfer(mission: Mission, dst:string, target_alt: float) { 
     table: TransferInfo[] = [
         TransferInfo("Kerbin", "Eve",    1000, -54.13,  143.44+180, 2226.01),
         TransferInfo("Kerbin", "Duna",   1000,  44.36,  138.75,     2267.83),
@@ -41,8 +41,10 @@ pub struct Transfer() {
         TransferInfo("Dres",   "Kerbin",  500,-329.68,  90.77+180,  1589.12)
     ]
 
+    mission: Mission = mission
     src : string = "source"
-    dst : string = "dst"
+    dst : string = dst
+    target_alt : float = target_alt
     alt : float = 0
     alt_new : float = 0
     a_phase : float = 0
@@ -111,20 +113,18 @@ impl Transfer {
     // - Planned transfer will be recorded in phase angle and ejection angle, velocity & time
     // - Function will not check if this actually results in an encounter
 
-    fn planTransfer(self, mission: Mission, dst:string, target_alt: float)-> Unit = { 
-        let con  = mission.console.value
-        let vessel = mission.vessel
+    fn getTransferNode(self)-> Node = { 
+        let con  = self.mission.console.value
+        let vessel = self.mission.vessel
         let orbit = vessel.orbit
         self.src = orbit.reference_body.name
-        self.dst = dst
 
         const t = self.table
-        if ( !find_body(dst).success ) {
+        if ( !find_body(self.dst).success ) {
             panic(format("Transfer destination {1} not found", (self.dst)))    
-            return
+            return ErrorNode()
         }        
         const body_dst = find_body(self.dst).value
-        con.log(format("Planning Transfer: {0} -> {1}",(self.src, target_alt)))
 
         // Check if we transfer planet->moon or star->planet (vs. planet to planet)
 
@@ -146,7 +146,7 @@ impl Transfer {
             // Estimate altitude we need to burn to. 
             // Basic formula is: radiums of orbit of target - radius of current body - radius of target body - target altitude
             // TODO: Need to adjust this for non-circular orbits by estimating rendevous time better. For now we just take 1/4 rotation.
-            self.alt_new = body_dst.orbit.radius(self.t_eject+body_dst.orbit.period/4)-orbit.reference_body.radius-body_dst.radius-target_alt
+            self.alt_new = body_dst.orbit.radius(self.t_eject+body_dst.orbit.period/4)-orbit.reference_body.radius-body_dst.radius-self.target_alt
             // Calculate dV needed to the new altitude
             self.v_eject = self.transferDeltaV(orbit, self.alt_new, self.t_eject)
 
@@ -160,7 +160,7 @@ impl Transfer {
                     //self.v_eject = t[i].v_eject
                 }
                 panic("Planet to Planet not implemented yet.")
-                return
+                return ErrorNode()
             }
             panic(format("No data found for transfer {0} -> {1}", (self.src, self.dst)))
         }
@@ -170,14 +170,106 @@ impl Transfer {
                        ( self.alt_new, pretty_dt(self.t_eject)) ))
         con.log(format("  eject at phase angle {0:N1}  ejection angle {1:N1}  dV: {2:N} m/s",
                        (self.a_phase, self.a_eject, self.v_eject.magnitude))) 
+
+        return Node(self.t_eject, self.v_eject)
     }
 
-    fn getTransferNode(self)-> Node = { 
-        if (self.t_eject == 0) {
-            panic("Can't add transfer node as none is planned.")
+    // Plan a Maneuver to fine-tune a transfer to a different body.
+    //
+    // The basic idea is that the initial transfer Node will get us close to a rendezvous, but
+    // an additional correction burn is required to get us in a good orbit.
+    // - This should be called after ejection burn has been executed
+    // - Main parameter is the target Periapsis at the target body
+
+    fn getCorrectionNode(self)-> Node = { 
+        const con  = self.mission.console.value
+        const vessel = self.mission.vessel
+        const dst_body = find_body(self.dst).value
+        const target_dist = self.target_alt+dst_body.radius
+
+        con.log(format("Planning correction burn to {0} alt {1}",(self.dst, self.target_alt)))
+
+        // Basic idea, do a gradient descent on a pro/retrograde burn to get the desired periapsis
+        // We use the game's maneuver nodes to do the calculation for us.
+
+        // Add a maneuver node to 2 minutes in the future
+        const maneuver_time = current_time()+120
+        vessel.maneuver.remove_all()
+        vessel.maneuver.add_burn_vector(maneuver_time, vec3(0,0,0))
+        yield()
+
+        // Get orbit after the maneuver. Run checks to make sure it worked.
+        if (vessel.maneuver.trajectory.length == 0) {
+            panic("Creating maneuver node failed.")
             return ErrorNode()
         }
-        return Node(self.t_eject, self.v_eject)
+
+        const new_orbit = vessel.maneuver.trajectory[0]
+        const node = vessel.maneuver.nodes[0]
+        sleep(0.5)
+
+        // Set up gradient descent
+        const speed = 0.05
+        let i = 0
+        let d_dv = 0.02
+        let d_best = 0.0
+        let t = 0.0
+
+        con.h3 = format("Planning correction burn for {0}",dst_body.name) 
+        con.h5 = "No encounter yet."
+
+        // Estimate current distance
+        const t0 = find_encounter_o(new_orbit, dst_body.orbit)
+        let d_now = find_distance_o(new_orbit, dst_body.orbit, t0)  
+        con.log(format("  pre-maneuver closest approach : {0} trying dV: {1} prograde",(pretty_distance(d_now), d_dv)))
+
+        // Optimize until we either have reached a minimum, or we are below the target altitude
+        while( (d_best > d_now && d_best > target_dist) || i < 10) {
+            i += 1
+            // Adjust burn and verify effect. We need to wait briefly after adjusting to let KSP catch up.
+            node.prograde = node.prograde+d_dv
+            sleep(0.1)
+
+            // Check if we are getting into the SOI of another body
+            if (vessel.maneuver.trajectory.length > 1) {
+                con.h5 = format("  Encounter with {0} detected.",(vessel.maneuver.trajectory[1].reference_body.name))
+                // This needs code to deal with this situation. For now, we just ignore.
+            }
+
+            // Calculate time and distance of closest approach
+            t = find_encounter_o(new_orbit, dst_body.orbit)
+            const d_next = find_distance_o(new_orbit, dst_body.orbit, t)  
+
+            // Gradient descent
+            const d_remaining = d_next-dst_body.radius   // Remaining distance to target altitude
+            const d_delta = (d_next-d_now)/d_dv          // Change in distance from 1m/s prograde
+            const dv_est = -d_remaining/d_delta          // Linear estimation of dV to reach target altitude
+            d_dv = clamp(dv_est*speed,-0.1,0.1)          // Actual change per iteration is adjusted by speed
+            con.h4 = format("# {0}  dV:{1:N3}  distance old/new {2}/{3} (delta: {4})", 
+                (i, node.prograde, pretty_distance(d_now), pretty_distance(d_next), pretty_distance(d_delta)) )
+            con.update_slow()
+
+            //con.log(format("      est. change for 1m/s dv: {0:N1}  required/current dV: {1:N3}/{2:N3} (delta: {3:N3}) adjust {4:n3}", 
+            //                     (pretty_distance(d_delta), dv_est+node.prograde, node.prograde, dv_est, d_dv)))
+            //con.log(format("      d_delta: {0:N3}  = (d_next: {1:N3} - d_now: {2:N3})/d_dv: {3:N3}", 
+            //                     (pretty_distance(d_delta), pretty_distance(d_next), pretty_distance(d_now), d_dv)))
+            //con.log(format("      dv_est: {0:N3}  = d_remaining: {1:N3} / d_delta: {2:N3}", 
+            //                     (dv_est, d_remaining, d_delta)))
+    
+            d_best = d_now
+            d_now = d_next
+        }
+
+        con.log(format("  post-maneuver closest approach: {0} in {1}   ({1} iterations)",(pretty_distance(d_now), pretty_dt(t), i)))
+
+        // Check how well we have done
+        if(vessel.maneuver.trajectory.length > 1) {
+            con.log(format("  encounter with {0}",(vessel.maneuver.trajectory[1].reference_body.name)))
+        }
+
+        const n_final = Node(maneuver_time, node.burn_vector)
+        vessel.maneuver.remove_all()
+        return n_final
     }
 
 }

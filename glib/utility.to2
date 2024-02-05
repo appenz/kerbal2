@@ -14,7 +14,7 @@ pub struct Universe() {
     KERBOL  : Body = find_body("Kerbol").value
     KERBIN  : Body = find_body("Kerbin").value
     MUN     : Body = find_body("Mun").value
-    MINIMUS : Body = find_body("Minimus").value
+    MINMUS : Body = find_body("Minmus").value
 }
 
 pub struct Location(body_name : string, latitude : float, longitude : float ) {
@@ -66,15 +66,60 @@ sync pub fn find_distance_t(t1: Targetable, t2: Targetable, t: float) -> float =
     return p1.distance(p2)
 }
 
+// Same as above, but with orbits
+sync pub fn find_distance_o(o1: Orbit, o2: Orbit, t: float) -> float = {
+    const p1 = o1.global_position(t)
+    const p2 = o2.global_position(t)
+    return p1.distance(p2)
+}
+
 sync pub fn find_distance(t1: Targetable, t2: Targetable) -> float = {
     return find_distance_t(t1,t2,current_time())
+}
+
+// Find the earliest time when two orbits come closest to each other via iteration
+pub fn find_encounter_o(o1: Orbit, o2: Orbit) -> float = {
+    
+    // Initial time step is 1% of the smaller of the two periods, minimum is 1s
+    let time_step = 0.05*min(o1.period, o2.period)
+    const min_time_step = 1.0 
+
+    let i = 0
+    let t = current_time()+time_step
+    let dx = 1.0
+    let d_now = 0.0
+
+    while( time_step > min_time_step) {
+        i += 1
+        d_now  = find_distance_o(o1,o2,t)
+        const d_forw = find_distance_o(o1,o2,t+time_step)
+        const d_back = find_distance_o(o1,o2,t-time_step)
+
+        //const s = format("{0,4:N0} {1} in {2} (d_now: {3} d_next: {4} speed: {5})",(i,pretty_distance(d_now), 
+        //                    pretty_dt(t), pretty_distance(d_forw), pretty_distance(d_back), pretty_time(time_step)) )
+        //debug(s)
+
+        // Check if we are getting closer
+        if(d_back > d_now && d_now > d_forw) {
+            t = t+time_step
+        } else if (d_forw > d_now && d_now > d_back) {
+            t = t-time_step
+        } else {
+            time_step = time_step/2
+        }
+    }
+    
+    //let s = format("Encounter at {0} in {1}  ({2} iternations)",(pretty_distance(d_now), pretty_dt(t), i))
+    //debug(s)
+
+    return t
 }
 
 // Find the earliest time when two targtables come within a certain distance
 // - Uses gradient descent
 // - Returns time to closest encounter if it can't go below distance
 pub fn find_encounter(t1: Targetable, t2: Targetable, distance: float) -> float = {
-    const speed = 0.01
+    const speed = 0.1
     let i = 0
     let t = current_time()
     let dx = 1.0
@@ -82,19 +127,22 @@ pub fn find_encounter(t1: Targetable, t2: Targetable, distance: float) -> float 
 
     while( dx > 0 && d_best > distance) {
         i += 1
-        const d_now = find_distance_t(t1,t2,t)
+        const d_now  = find_distance_t(t1,t2,t)
         const d_next = find_distance_t(t1,t2,t+1)
         dx = d_now-d_next
         if(dx > 0) {
             t = t+d_now/dx*speed
         }
         d_best = find_distance_t(t1,t2,t)
-        //const s = format("{0,4:N0} {1} in {2}",(i,pretty_distance(d_best), pretty_dt(t)))
+        //const s = format("{0,4:N0} {1} in {2} (dx: {3} d_now: {4} d_next: {5})",(i,pretty_distance(d_best), 
+        //                    pretty_dt(t), pretty_distance(dx), pretty_distance(d_now), pretty_distance(d_next)))
         //warning(s)
     }
 
     return t
 }
+
+
 
 // Find the earliest time when a targetable is a certain distance from its body
 // - Uses gradient descent

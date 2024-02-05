@@ -125,7 +125,7 @@ impl Node {
 
 // Returns an invalid node
 pub sync fn ErrorNode() -> Node = {
-    return Node(-1, vec3(1,2,3))
+    return Node(-1, vec3(0,0,0))
 }
 
 //
@@ -176,7 +176,7 @@ pub sync fn change_incl(vessel: Vessel, target_orbit: Orbit) -> Node = {
     const v_vessel = vessel.orbit.global_velocity(t_node).to_local(frame)
     const dv_mag = -target_orbit.orbit_normal.normalized.dot(v_vessel)
     const dv = dv_mag*vessel.orbit.orbit_normal
-    //warning(format("{0:N3} {1:N3} delta: {2:N3} mean_v: {3:N4} t: {4}", (ma_v, dn_ta, (dn_ta-ma_v), vessel.orbit.mean_motion, pretty_dt(t_node) )))
+    warning(format("{0:N3} {1:N3} delta: {2:N3} mean_v: {3:N4} t: {4}", (ma_v, dn_ta, (dn_ta-ma_v), vessel.orbit.mean_motion, pretty_dt(t_node) )))
     return Node(t_node,dv)
 }
 

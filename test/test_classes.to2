@@ -14,11 +14,11 @@ pub struct foo() {
 }
 
 pub struct bar() {
-    foo1 : test::classes::foo = test::classes::foo()
+    foo1 : test::test_classes::foo = test::test_classes::foo()
 }
 
-pub struct bar2(f : Option<test::classes::foo> ) {
-    foo1 : Option<test::classes::foo>  = f
+pub struct bar2(f : Option<test::test_classes::foo> ) {
+    foo1 : Option<test::test_classes::foo>  = f
 }
 
 // So how do we create a structure with a pointer to another structure
@@ -26,6 +26,13 @@ pub struct bar2(f : Option<test::classes::foo> ) {
 //
 // Naively we would do this:
 //   foo1 : Option<test::classes::foo>  = None()
+
+// Update: This may work now in 0.5.2.5? I may have to re-write some code
+
+pub struct bar2a() {
+    foo1 : Option<test::test_classes::foo>  = None()
+}
+
 //
 // But it fails with the following error.
 //   ERROR: [test\classes.to2(17, 42)] InvalidType
@@ -34,12 +41,12 @@ pub struct bar2(f : Option<test::classes::foo> ) {
 // We can instantiate an empty struct inside a struct if we use a function
 // instead. It's a little bit hacky.
 
-pub sync fn no_foo() -> Option<test::classes::foo> = {
+pub sync fn no_foo() -> Option<test::test_classes::foo> = {
     return None()
 }
 
 pub struct bar3() {
-    foo1 : Option<test::classes::foo>  = no_foo()
+    foo1 : Option<test::test_classes::foo>  = no_foo()
 }
 
 pub struct arrayTest() {
@@ -61,8 +68,9 @@ fn main_flight(vessel: Vessel) -> Unit = {
     let b = bar()
 
     // We can do lazy initialization
-    let f : Option<test::classes::foo> = None()
+    let f : Option<test::test_classes::foo> = None()
     let b2 = bar2(f)
+    let b2a = bar2a()
     let f2 = b2.foo1
 
     // Function works too
