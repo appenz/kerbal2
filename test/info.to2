@@ -6,7 +6,6 @@ use { format } from core::str
 // Print is much useful info about our current state as possible
 
 pub fn main_flight(vessel: Vessel) -> Unit = {
-
     // Standard Setup
     let mission = glib::mission::Mission("Vessel Info",vessel)
     let con = mission.start()
